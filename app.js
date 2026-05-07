@@ -216,6 +216,11 @@ let _emps = [];
 let _bills = [];
 let _fsReady = false;
 
+function _saveLocal() {
+  localStorage.setItem("mpa_emps", JSON.stringify(_emps));
+  localStorage.setItem("mpa_bills", JSON.stringify(_bills));
+}
+
 const DB = {
   emps() {
     return _emps;
@@ -228,55 +233,86 @@ const DB = {
     if (!_fsReady) {
       data.id = uid();
       _emps.push(data);
+      _saveLocal();
       renderAll();
       return;
     }
     const { addDoc, collection } = window._fs;
-    const ref = await addDoc(collection("employees"), data);
-    data.id = ref.id;
+    try {
+      const ref = await addDoc(collection("employees"), data);
+      data.id = ref.id;
+    } catch (err) {
+      toast("সংরক্ষণ ব্যর্থ: " + (err.code || err.message), "er");
+      throw err;
+    }
   },
 
   async updateEmp(id, data) {
     if (!_fsReady) {
       const i = _emps.findIndex((e) => e.id === id);
       if (i > -1) _emps[i] = { ..._emps[i], ...data };
+      _saveLocal();
       renderAll();
       return;
     }
     const { db, doc, setDoc } = window._fs;
-    await setDoc(doc(db, "employees", id), data);
+    try {
+      await setDoc(doc(db, "employees", id), data);
+    } catch (err) {
+      toast("আপডেট ব্যর্থ: " + (err.code || err.message), "er");
+      throw err;
+    }
   },
 
   async deleteEmp(id) {
     if (!_fsReady) {
       _emps = _emps.filter((e) => e.id !== id);
+      _saveLocal();
       renderAll();
       return;
     }
     const { db, doc, deleteDoc } = window._fs;
-    await deleteDoc(doc(db, "employees", id));
+    try {
+      await deleteDoc(doc(db, "employees", id));
+    } catch (err) {
+      toast("মুছতে ব্যর্থ: " + (err.code || err.message), "er");
+      throw err;
+    }
   },
 
   async addBill(data) {
     if (!_fsReady) {
       data.id = uid();
       _bills.push(data);
+      _saveLocal();
       renderAll();
       return;
     }
     const { addDoc, collection } = window._fs;
-    const ref = await addDoc(collection("bills"), data);
-    data.id = ref.id;
+    try {
+      const { id: _localId, ...docData } = data;
+      const ref = await addDoc(collection("bills"), docData);
+      data.id = ref.id;
+    } catch (err) {
+      toast("সংরক্ষণ ব্যর্থ: " + (err.code || err.message), "er");
+      throw err;
+    }
   },
 
   async deleteBill(id) {
     if (!_fsReady) {
       _bills = _bills.filter((b) => b.id !== id);
+      _saveLocal();
       renderAll();
       return;
     }
     const { db, doc, deleteDoc } = window._fs;
-    await deleteDoc(doc(db, "bills", id));
+    try {
+      await deleteDoc(doc(db, "bills", id));
+    } catch (err) {
+      toast("মুছতে ব্যর্থ: " + (err.code || err.message), "er");
+      throw err;
+    }
   },
 };
 
@@ -304,15 +340,13 @@ function setupListeners() {
   onSnapshot(
     collection("employees"),
     (snap) => {
-      _emps = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      _emps = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
       renderEmpTable();
       renderEmpGrid();
       renderDash();
-      // Seed if empty
-      if (_emps.length === 0) seedFirestore();
     },
     (err) => {
-      console.error("Emp listener:", err);
+      toast("কর্মচারী ডেটা লোড ব্যর্থ: " + (err.code || err.message), "er");
     },
   );
 
@@ -320,7 +354,7 @@ function setupListeners() {
   onSnapshot(
     collection("bills"),
     (snap) => {
-      _bills = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      _bills = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
       _bills.sort((a, b) =>
         (a.createdAt || "").localeCompare(b.createdAt || ""),
       );
@@ -328,7 +362,7 @@ function setupListeners() {
       renderDash();
     },
     (err) => {
-      console.error("Bill listener:", err);
+      toast("বিল ডেটা লোড ব্যর্থ: " + (err.code || err.message), "er");
     },
   );
 }
@@ -342,11 +376,18 @@ async function seedFirestore() {
 }
 
 // Wait for Firebase module to load then start
-window.addEventListener("firebaseReady", () => {
+window.addEventListener("firebaseReady", async () => {
   _fsReady = true;
   setStatus(true);
   setupListeners();
   toast("☁️ Firebase সংযুক্ত হয়েছে", "ok");
+  // Seed once on first-ever install only
+  if (!localStorage.getItem("mpa_seeded")) {
+    const { getDocs, collection } = window._fs;
+    const snap = await getDocs(collection("employees"));
+    if (snap.empty) await seedFirestore();
+    localStorage.setItem("mpa_seeded", "1");
+  }
 });
 
 // Fallback: if Firebase doesn't load in 3s, use localStorage
@@ -445,7 +486,7 @@ function renderDash() {
       <td>
         <div class="flex gap-2">
           <button class="btn btn-outline btn-xs" onclick="printBill('${b.id}')">🖨️</button>
-          <button class="btn btn-danger btn-xs" onclick="delBill('${b.id}')">🗑️</button>
+          ${isAdmin ? `<button class="btn btn-danger btn-xs" onclick="delBill('${b.id}')">🗑️</button>` : ""}
         </div>
       </td>
     </tr>`;
@@ -678,14 +719,16 @@ async function saveEmp() {
     return;
   }
   const data = { name, desig, ic, dept, branch, basic };
-  if (editEmpId) {
-    await DB.updateEmp(editEmpId, data);
-    toast("কর্মচারী আপডেট ✓");
-  } else {
-    await DB.addEmp(data);
-    toast("কর্মচারী যোগ ✓");
-  }
-  closeEmpModal();
+  try {
+    if (editEmpId) {
+      await DB.updateEmp(editEmpId, data);
+      toast("কর্মচারী আপডেট ✓");
+    } else {
+      await DB.addEmp(data);
+      toast("কর্মচারী যোগ ✓");
+    }
+    closeEmpModal();
+  } catch {}
 }
 
 async function delEmp(id) {
@@ -695,8 +738,10 @@ async function delEmp(id) {
   }
   if (!confirm("এই কর্মচারী মুছবেন?")) return;
   if (selEmpId === id) deselectEmp();
-  await DB.deleteEmp(id);
-  toast("মুছে ফেলা হয়েছে");
+  try {
+    await DB.deleteEmp(id);
+    toast("মুছে ফেলা হয়েছে");
+  } catch {}
 }
 
 function renderEmpTable() {
@@ -1034,8 +1079,10 @@ async function saveBill() {
     note: document.getElementById("billNote").value,
     createdAt: new Date().toISOString(),
   };
-  await DB.addBill(bill);
-  toast("বিল সংরক্ষণ হয়েছে ✓");
+  try {
+    await DB.addBill(bill);
+    toast("বিল সংরক্ষণ হয়েছে ✓");
+  } catch {}
 }
 
 /* ===================================================
@@ -1075,7 +1122,7 @@ function renderBills(filter) {
       <td>
         <div class="flex gap-2">
           <button class="btn btn-outline btn-xs" onclick="printBill('${b.id}')">🖨️</button>
-          <button class="btn btn-danger btn-xs" onclick="delBill('${b.id}')">🗑️</button>
+          ${isAdmin ? `<button class="btn btn-danger btn-xs" onclick="delBill('${b.id}')">🗑️</button>` : ""}
         </div>
       </td>
     </tr>`;
@@ -1089,13 +1136,15 @@ function filterBills(v) {
 
 async function delBill(id) {
   if (!isAdmin) {
-    toast("⚠️ Admin লগইন প্রয়োজন", "error");
+    toast("⚠️ Admin লগইন প্রয়োজন", "er");
     openAdminModal();
     return;
   }
   if (!confirm("এই বিল মুছবেন?")) return;
-  await DB.deleteBill(id);
-  toast("বিল মুছে ফেলা হয়েছে");
+  try {
+    await DB.deleteBill(id);
+    toast("বিল মুছে ফেলা হয়েছে");
+  } catch {}
 }
 
 /* ===================================================
@@ -1404,11 +1453,13 @@ function doPrint() {
       }
     }`;
   document.head.appendChild(style);
-  window.print();
-  setTimeout(() => {
+  const cleanupPrint = () => {
     document.getElementById("ps")?.remove();
     pa.style.cssText = "display:none;";
-  }, 3000);
+    window.removeEventListener("afterprint", cleanupPrint);
+  };
+  window.addEventListener("afterprint", cleanupPrint);
+  window.print();
 }
 
 /* ===================================================
