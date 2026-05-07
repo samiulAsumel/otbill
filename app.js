@@ -1088,6 +1088,11 @@ function filterBills(v) {
 }
 
 async function delBill(id) {
+  if (!isAdmin) {
+    toast("⚠️ Admin লগইন প্রয়োজন", "error");
+    openAdminModal();
+    return;
+  }
   if (!confirm("এই বিল মুছবেন?")) return;
   await DB.deleteBill(id);
   toast("বিল মুছে ফেলা হয়েছে");
