@@ -1,359 +1,721 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="bn">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OT Bill — মোংলা বন্দর কর্তৃপক্ষ</title>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OT Bill — মোংলা বন্দর কর্তৃপক্ষ</title>
 
-<!-- Nikosh Bengali Font -->
-<link href="https://fonts.maateen.me/nikosh/font.css" rel="stylesheet">
+    <!-- Favicon -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%231e3a5f'/><text x='50' y='60' font-size='60' font-weight='bold' text-anchor='middle' dominant-baseline='middle' fill='%23f39c12'>⚓</text></svg>"
+    />
 
-<!-- App Styles -->
-<link rel="stylesheet" href="styles.css">
+    <!-- Nikosh Bengali Font -->
+    <link href="https://fonts.maateen.me/nikosh/font.css" rel="stylesheet" />
 
-<!-- Firebase SDK (module) -->
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {
-  getFirestore, collection, getDocs, addDoc, setDoc,
-  deleteDoc, doc, onSnapshot, orderBy, query
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    <!-- App Styles -->
+    <link rel="stylesheet" href="styles.css" />
 
-const firebaseConfig = {
-  apiKey: "AIzaSyAK9ubW1oddyWczbOWmkYVSjarVFKmN6C8",
-  authDomain: "ot-bill-107ea.firebaseapp.com",
-  projectId: "ot-bill-107ea",
-  storageBucket: "ot-bill-107ea.firebasestorage.app",
-  messagingSenderId: "750813485662",
-  appId: "1:750813485662:web:08ca8bc4cf2c35a6d6f2cf"
-};
+    <!-- Firebase SDK (module) -->
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+      import {
+        getFirestore,
+        collection,
+        getDocs,
+        addDoc,
+        setDoc,
+        deleteDoc,
+        doc,
+        onSnapshot,
+        orderBy,
+        query,
+      } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-const app = initializeApp(firebaseConfig);
-const db  = getFirestore(app);
+      const firebaseConfig = {
+        apiKey: "AIzaSyAK9ubW1oddyWczbOWmkYVSjarVFKmN6C8",
+        authDomain: "ot-bill-107ea.firebaseapp.com",
+        projectId: "ot-bill-107ea",
+        storageBucket: "ot-bill-107ea.firebasestorage.app",
+        messagingSenderId: "750813485662",
+        appId: "1:750813485662:web:08ca8bc4cf2c35a6d6f2cf",
+      };
 
-window._fs = {
-  db,
-  collection: (name) => collection(db, name),
-  getDocs, addDoc, setDoc, deleteDoc, doc, onSnapshot, orderBy, query,
-};
+      const app = initializeApp(firebaseConfig);
+      const db = getFirestore(app);
 
-window.dispatchEvent(new Event('firebaseReady'));
-</script>
+      window._fs = {
+        db,
+        collection: (name) => collection(db, name),
+        getDocs,
+        addDoc,
+        setDoc,
+        deleteDoc,
+        doc,
+        onSnapshot,
+        orderBy,
+        query,
+      };
 
-</head>
-<body>
+      window.dispatchEvent(new Event("firebaseReady"));
+    </script>
+  </head>
+  <body>
+    <!-- TOASTS -->
+    <div class="toasts" id="toasts"></div>
 
-<!-- TOASTS -->
-<div class="toasts" id="toasts"></div>
+    <!-- PRINT AREA -->
+    <div class="print-area" id="printArea"></div>
 
-<!-- PRINT AREA -->
-<div class="print-area" id="printArea"></div>
-
-<!-- APP -->
-<div class="layout">
-
-  <!-- SIDEBAR -->
-  <aside class="sidebar">
-    <div class="sidebar-brand">
-      <div class="brand-icon">⚓</div>
-      <div class="brand-title">মোংলা বন্দর কর্তৃপক্ষ</div>
-      <div class="brand-sub">OT Bill Management</div>
-    </div>
-    <nav class="nav">
-      <div class="nav-group-label">প্রধান মেনু</div>
-      <div class="nav-item active" data-view="dashboard" onclick="goView('dashboard')">
-        <span class="ni">📊</span> ড্যাশবোর্ড
-      </div>
-      <div class="nav-item" data-view="new-bill" onclick="goView('new-bill')">
-        <span class="ni">📝</span> নতুন OT বিল
-      </div>
-      <div class="nav-item" data-view="all-bills" onclick="goView('all-bills')">
-        <span class="ni">📋</span> সকল বিল
-      </div>
-      <div class="nav-group-label">ব্যবস্থাপনা</div>
-      <div class="nav-item" data-view="employees" onclick="goView('employees')">
-        <span class="ni">👤</span> কর্মচারী ডেটাবেস
-      </div>
-    </nav>
-    <div class="sidebar-foot">ট্রাফিক — রাজস্ব ও রিটার্ন শাখা<br>মোংলা, বাগেরহাট<br><span style="font-size:11.5px;color:var(--gold);">© <span id="cpYear"></span> samiulAsumel. All rights reserved.</span></div>
-  </aside>
-
-  <!-- MAIN -->
-  <div class="main">
-    <div class="topbar">
-      <div>
-        <div class="topbar-title" id="viewTitle">ড্যাশবোর্ড</div>
-        <div class="topbar-sub">অতিরিক্ত কাজের বিল ব্যবস্থাপনা</div>
-      </div>
-      <div class="flex gap-2 items-center">
-        <span id="fbStatus" style="margin-right:4px;">⏳</span>
-        <span id="adminBadge" style="display:none;align-items:center;gap:5px;background:rgba(217,92,92,.15);border:1px solid rgba(217,92,92,.3);color:#e88;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;">🔐 Admin Mode</span>
-        <button class="btn btn-primary" onclick="goView('new-bill')">＋ নতুন বিল</button>
-      </div>
-    </div>
-    <div class="page">
-
-      <!-- DASHBOARD -->
-      <div class="view active" id="view-dashboard">
-        <div class="stats" id="statsRow">
-          <div class="stat"><div class="stat-ico">👤</div><div class="stat-num" id="s-emp">০</div><div class="stat-lbl">কর্মচারী</div></div>
-          <div class="stat"><div class="stat-ico">📋</div><div class="stat-num" id="s-bills">০</div><div class="stat-lbl">মোট বিল</div></div>
-          <div class="stat"><div class="stat-ico">⏱️</div><div class="stat-num" id="s-hrs">০</div><div class="stat-lbl">মোট OT ঘন্টা</div></div>
-          <div class="stat"><div class="stat-ico">💰</div><div class="stat-num" id="s-amt">০</div><div class="stat-lbl">মোট টাকা</div></div>
+    <!-- APP -->
+    <div class="layout">
+      <!-- SIDEBAR -->
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-icon">⚓</div>
+          <div class="brand-title">মোংলা বন্দর কর্তৃপক্ষ</div>
+          <div class="brand-sub">OT Bill Management</div>
         </div>
-        <div class="card">
-          <div class="card-head">
-            <div><div class="card-title">সাম্প্রতিক বিল</div><div class="card-sub">Latest 10 bills</div></div>
-            <button class="btn btn-outline btn-sm" onclick="goView('all-bills')">সব দেখুন →</button>
+        <nav class="nav">
+          <div class="nav-group-label">প্রধান মেনু</div>
+          <div
+            class="nav-item active"
+            data-view="dashboard"
+            onclick="goView('dashboard')"
+          >
+            <span class="ni">📊</span> ড্যাশবোর্ড
           </div>
-          <div class="tbl-wrap">
-            <table class="dt"><thead><tr>
-              <th>কর্মচারী</th><th>পদবী</th><th>মাস</th><th>ঘন্টা</th><th>টাকা</th><th>Action</th>
-            </tr></thead><tbody id="dash-tbody"></tbody></table>
+          <div
+            class="nav-item"
+            data-view="new-bill"
+            onclick="goView('new-bill')"
+          >
+            <span class="ni">📝</span> নতুন OT বিল
           </div>
+          <div
+            class="nav-item"
+            data-view="all-bills"
+            onclick="goView('all-bills')"
+          >
+            <span class="ni">📋</span> সকল বিল
+          </div>
+          <div class="nav-group-label">ব্যবস্থাপনা</div>
+          <div
+            class="nav-item"
+            data-view="employees"
+            onclick="goView('employees')"
+          >
+            <span class="ni">👤</span> কর্মচারী ডেটাবেস
+          </div>
+        </nav>
+        <div class="sidebar-foot">
+          ট্রাফিক — রাজস্ব ও রিটার্ন শাখা<br />মোংলা, বাগেরহাট<br /><span
+            style="font-size: 11.5px; color: var(--gold)"
+            >© <span id="cpYear"></span> samiulAsumel. All rights
+            reserved.</span
+          >
         </div>
-      </div>
+      </aside>
 
-      <!-- NEW BILL -->
-      <div class="view" id="view-new-bill">
-        <!-- Step 1: Select Employee -->
-        <div class="card" id="card-step1">
-          <div class="card-head">
-            <div><div class="card-title">ধাপ ১ — কর্মচারী নির্বাচন</div><div class="card-sub">Select employee to create OT bill</div></div>
-            <button class="btn btn-outline btn-sm" onclick="openEmpModal()">＋ নতুন কর্মচারী</button>
+      <!-- MAIN -->
+      <div class="main">
+        <div class="topbar">
+          <div>
+            <div class="topbar-title" id="viewTitle">ড্যাশবোর্ড</div>
+            <div class="topbar-sub">অতিরিক্ত কাজের বিল ব্যবস্থাপনা</div>
           </div>
-          <div class="emp-grid" id="empGrid"></div>
-          <div class="empty" id="empEmpty" style="display:none">
-            <div class="empty-ico">👤</div>
-            <h3>কোনো কর্মচারী নেই</h3>
-            <p>প্রথমে কর্মচারী যোগ করুন</p>
-            <button class="btn btn-primary mt-3" onclick="openEmpModal()">＋ কর্মচারী যোগ</button>
+          <div class="flex gap-2 items-center">
+            <span id="fbStatus" style="margin-right: 4px">⏳</span>
+            <span
+              id="adminBadge"
+              style="
+                display: none;
+                align-items: center;
+                gap: 5px;
+                background: rgba(217, 92, 92, 0.15);
+                border: 1px solid rgba(217, 92, 92, 0.3);
+                color: #e88;
+                padding: 4px 10px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 600;
+              "
+              >🔐 Admin Mode</span
+            >
+            <button class="btn btn-primary" onclick="goView('new-bill')">
+              ＋ নতুন বিল
+            </button>
           </div>
         </div>
-        <!-- Step 2: OT Entries -->
-        <div id="card-step2" style="display:none">
-          <div class="card">
-            <div class="card-head">
-              <div>
-                <div class="card-title" id="step2EmpName">—</div>
-                <div class="card-sub" id="step2EmpMeta">—</div>
+        <div class="page">
+          <!-- DASHBOARD -->
+          <div class="view active" id="view-dashboard">
+            <div class="stats" id="statsRow">
+              <div class="stat">
+                <div class="stat-ico">👤</div>
+                <div class="stat-num" id="s-emp">০</div>
+                <div class="stat-lbl">কর্মচারী</div>
               </div>
-              <button class="btn btn-outline btn-sm" onclick="deselectEmp()">← কর্মচারী পরিবর্তন</button>
-            </div>
-            <div class="flex gap-2 mb-3" style="flex-wrap:wrap;align-items:flex-end">
-              <div class="form-group" style="min-width:160px">
-                <label class="form-label">মাস</label>
-                <input type="month" id="billMonth" class="form-input" onchange="onMonthChange()">
+              <div class="stat">
+                <div class="stat-ico">📋</div>
+                <div class="stat-num" id="s-bills">০</div>
+                <div class="stat-lbl">মোট বিল</div>
               </div>
-              <div class="form-group" style="min-width:160px">
-                <label class="form-label">মূল বেতন (টাকা)</label>
-                <input type="number" id="billBasic" class="form-input" oninput="recalc()">
+              <div class="stat">
+                <div class="stat-ico">⏱️</div>
+                <div class="stat-num" id="s-hrs">০</div>
+                <div class="stat-lbl">মোট OT ঘন্টা</div>
               </div>
-              <div class="flex gap-2 items-center" style="margin-bottom:2px">
-                <span class="text-muted text-sm">Default সময়:</span>
-                <select id="defFrom" class="form-input" style="width:110px" onchange=""></select>
-                <span class="text-muted">—</span>
-                <select id="defTo" class="form-input" style="width:110px" onchange=""></select>
-                <button class="btn btn-outline btn-sm" onclick="applyDefTime()">সব-এ দিন</button>
-              </div>
-            </div>
-            <div class="ot-wrap">
-              <table class="ot-tbl" id="otTable">
-                <thead><tr>
-                  <th><input type="checkbox" id="cbAll" onchange="selectAll(this.checked)"></th>
-                  <th>#</th>
-                  <th style="min-width:120px">তারিখ</th>
-                  <th style="min-width:60px">বার</th>
-                  <th style="min-width:100px">হইতে</th>
-                  <th style="min-width:100px">পর্যন্ত</th>
-                  <th style="min-width:70px">ঘন্টা</th>
-                </tr></thead>
-                <tbody id="otTbody"></tbody>
-                <tfoot><tr>
-                  <td colspan="6" style="text-align:right;padding:7px 10px;color:var(--gold);font-weight:700;font-size:12px">
-                    নির্বাচিত: <strong id="selDays" style="color:var(--white)">০</strong> দিন &nbsp;|&nbsp; সর্বমোট:
-                  </td>
-                  <td class="hc" id="totHrsCell">০</td>
-                </tr></tfoot>
-              </table>
-            </div>
-          </div>
-          <div class="form-grid">
-            <div class="summary-box">
-              <div class="sum-row"><span class="text-muted">মোট OT ঘন্টা</span><span class="sv" id="sm-hrs">০</span></div>
-              <div class="sum-row"><span class="text-muted">ঘন্টা প্রতি হার</span><span class="sv" id="sm-rate">০ টাকা</span></div>
-              <div class="sum-row sum-total"><span class="text-muted">মোট প্রদেয়</span><span class="sv" id="sm-total">৳ ০</span></div>
-              <div class="sum-words" id="sm-words">—</div>
-            </div>
-            <div class="flex" style="flex-direction:column;gap:10px">
-              <div class="form-group">
-                <label class="form-label">নোট (ঐচ্ছিক)</label>
-                <textarea id="billNote" class="form-input" rows="4" placeholder="অতিরিক্ত মন্তব্য..."></textarea>
-              </div>
-              <div class="flex gap-2 mt-2">
-                <button class="btn btn-success w-full" onclick="saveBill()">💾 সংরক্ষণ</button>
-                <button class="btn btn-primary" onclick="doPreviewPrint()">🖨️ প্রিন্ট</button>
+              <div class="stat">
+                <div class="stat-ico">💰</div>
+                <div class="stat-num" id="s-amt">০</div>
+                <div class="stat-lbl">মোট টাকা</div>
               </div>
             </div>
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <div class="card-title">সাম্প্রতিক বিল</div>
+                  <div class="card-sub">Latest 10 bills</div>
+                </div>
+                <button
+                  class="btn btn-outline btn-sm"
+                  onclick="goView('all-bills')"
+                >
+                  সব দেখুন →
+                </button>
+              </div>
+              <div class="tbl-wrap">
+                <table class="dt">
+                  <thead>
+                    <tr>
+                      <th>কর্মচারী</th>
+                      <th>পদবী</th>
+                      <th>মাস</th>
+                      <th>ঘন্টা</th>
+                      <th>টাকা</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="dash-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- NEW BILL -->
+          <div class="view" id="view-new-bill">
+            <!-- Step 1: Select Employee -->
+            <div class="card" id="card-step1">
+              <div class="card-head">
+                <div>
+                  <div class="card-title">ধাপ ১ — কর্মচারী নির্বাচন</div>
+                  <div class="card-sub">Select employee to create OT bill</div>
+                </div>
+                <button class="btn btn-outline btn-sm" onclick="openEmpModal()">
+                  ＋ নতুন কর্মচারী
+                </button>
+              </div>
+              <div class="emp-grid" id="empGrid"></div>
+              <div class="empty" id="empEmpty" style="display: none">
+                <div class="empty-ico">👤</div>
+                <h3>কোনো কর্মচারী নেই</h3>
+                <p>প্রথমে কর্মচারী যোগ করুন</p>
+                <button class="btn btn-primary mt-3" onclick="openEmpModal()">
+                  ＋ কর্মচারী যোগ
+                </button>
+              </div>
+            </div>
+            <!-- Step 2: OT Entries -->
+            <div id="card-step2" style="display: none">
+              <div class="card">
+                <div class="card-head">
+                  <div>
+                    <div class="card-title" id="step2EmpName">—</div>
+                    <div class="card-sub" id="step2EmpMeta">—</div>
+                  </div>
+                  <button
+                    class="btn btn-outline btn-sm"
+                    onclick="deselectEmp()"
+                  >
+                    ← কর্মচারী পরিবর্তন
+                  </button>
+                </div>
+                <div
+                  class="flex gap-2 mb-3"
+                  style="flex-wrap: wrap; align-items: flex-end"
+                >
+                  <div class="form-group" style="min-width: 160px">
+                    <label class="form-label">মাস</label>
+                    <input
+                      type="month"
+                      id="billMonth"
+                      class="form-input"
+                      onchange="onMonthChange()"
+                    />
+                  </div>
+                  <div class="form-group" style="min-width: 160px">
+                    <label class="form-label">মূল বেতন (টাকা)</label>
+                    <input
+                      type="number"
+                      id="billBasic"
+                      class="form-input"
+                      oninput="recalc()"
+                    />
+                  </div>
+                  <div
+                    class="flex gap-2 items-center"
+                    style="margin-bottom: 2px"
+                  >
+                    <span class="text-muted text-sm">Default সময়:</span>
+                    <select
+                      id="defFrom"
+                      class="form-input"
+                      style="width: 110px"
+                      onchange=""
+                    ></select>
+                    <span class="text-muted">—</span>
+                    <select
+                      id="defTo"
+                      class="form-input"
+                      style="width: 110px"
+                      onchange=""
+                    ></select>
+                    <button
+                      class="btn btn-outline btn-sm"
+                      onclick="applyDefTime()"
+                    >
+                      সব-এ দিন
+                    </button>
+                  </div>
+                </div>
+                <div class="ot-wrap">
+                  <table class="ot-tbl" id="otTable">
+                    <thead>
+                      <tr>
+                        <th>
+                          <input
+                            type="checkbox"
+                            id="cbAll"
+                            onchange="selectAll(this.checked)"
+                          />
+                        </th>
+                        <th>#</th>
+                        <th style="min-width: 120px">তারিখ</th>
+                        <th style="min-width: 60px">বার</th>
+                        <th style="min-width: 100px">হইতে</th>
+                        <th style="min-width: 100px">পর্যন্ত</th>
+                        <th style="min-width: 70px">ঘন্টা</th>
+                      </tr>
+                    </thead>
+                    <tbody id="otTbody"></tbody>
+                    <tfoot>
+                      <tr>
+                        <td
+                          colspan="6"
+                          style="
+                            text-align: right;
+                            padding: 7px 10px;
+                            color: var(--gold);
+                            font-weight: 700;
+                            font-size: 12px;
+                          "
+                        >
+                          নির্বাচিত:
+                          <strong id="selDays" style="color: var(--white)"
+                            >০</strong
+                          >
+                          দিন &nbsp;|&nbsp; সর্বমোট:
+                        </td>
+                        <td class="hc" id="totHrsCell">০</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+              <div class="form-grid">
+                <div class="summary-box">
+                  <div class="sum-row">
+                    <span class="text-muted">মোট OT ঘন্টা</span
+                    ><span class="sv" id="sm-hrs">০</span>
+                  </div>
+                  <div class="sum-row">
+                    <span class="text-muted">ঘন্টা প্রতি হার</span
+                    ><span class="sv" id="sm-rate">০ টাকা</span>
+                  </div>
+                  <div class="sum-row sum-total">
+                    <span class="text-muted">মোট প্রদেয়</span
+                    ><span class="sv" id="sm-total">৳ ০</span>
+                  </div>
+                  <div class="sum-words" id="sm-words">—</div>
+                </div>
+                <div class="flex" style="flex-direction: column; gap: 10px">
+                  <div class="form-group">
+                    <label class="form-label">নোট (ঐচ্ছিক)</label>
+                    <textarea
+                      id="billNote"
+                      class="form-input"
+                      rows="4"
+                      placeholder="অতিরিক্ত মন্তব্য..."
+                    ></textarea>
+                  </div>
+                  <div class="flex gap-2 mt-2">
+                    <button class="btn btn-success w-full" onclick="saveBill()">
+                      💾 সংরক্ষণ
+                    </button>
+                    <button class="btn btn-primary" onclick="doPreviewPrint()">
+                      🖨️ প্রিন্ট
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ALL BILLS -->
+          <div class="view" id="view-all-bills">
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <div class="card-title">সকল বিল</div>
+                  <div class="card-sub">Complete history</div>
+                </div>
+                <div class="search">
+                  <input
+                    type="text"
+                    id="billSearch"
+                    class="form-input"
+                    placeholder="নাম বা মাস খুঁজুন..."
+                    oninput="filterBills(this.value)"
+                    style="width: 220px"
+                  />
+                </div>
+              </div>
+              <div class="tbl-wrap">
+                <table class="dt">
+                  <thead>
+                    <tr>
+                      <th>কর্মচারী</th>
+                      <th>পদবী</th>
+                      <th>IC</th>
+                      <th>মাস</th>
+                      <th>দিন</th>
+                      <th>ঘন্টা</th>
+                      <th>হার</th>
+                      <th>টাকা</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bills-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- EMPLOYEES -->
+          <div class="view" id="view-employees">
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <div class="card-title">কর্মচারী ডেটাবেস</div>
+                  <div class="card-sub">Employee records</div>
+                </div>
+                <button class="btn btn-primary" onclick="openEmpModal()">
+                  ＋ কর্মচারী যোগ
+                </button>
+              </div>
+              <div class="tbl-wrap">
+                <table class="dt">
+                  <thead>
+                    <tr>
+                      <th>নাম</th>
+                      <th>পদবী</th>
+                      <th>বিভাগ</th>
+                      <th>শাখা</th>
+                      <th>মূল বেতন</th>
+                      <th>IC নং</th>
+                      <th>ঘন্টা হার</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="emp-tbody"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       </div>
+    </div>
 
-      <!-- ALL BILLS -->
-      <div class="view" id="view-all-bills">
-        <div class="card">
-          <div class="card-head">
-            <div><div class="card-title">সকল বিল</div><div class="card-sub">Complete history</div></div>
-            <div class="search"><input type="text" id="billSearch" class="form-input" placeholder="নাম বা মাস খুঁজুন..." oninput="filterBills(this.value)" style="width:220px"></div>
+    <!-- EMPLOYEE MODAL -->
+    <div class="overlay" id="empOverlay">
+      <div class="modal">
+        <div class="modal-head">
+          <div class="modal-title" id="empModalTitle">কর্মচারী যোগ</div>
+          <button class="modal-x" onclick="closeEmpModal()">✕</button>
+        </div>
+        <div class="form-grid">
+          <div class="form-group full">
+            <label class="form-label">পূর্ণ নাম *</label>
+            <input
+              type="text"
+              id="ef-name"
+              class="form-input"
+              placeholder="মোঃ নাম"
+            />
           </div>
-          <div class="tbl-wrap">
-            <table class="dt"><thead><tr>
-              <th>কর্মচারী</th><th>পদবী</th><th>IC</th><th>মাস</th><th>দিন</th><th>ঘন্টা</th><th>হার</th><th>টাকা</th><th>Action</th>
-            </tr></thead><tbody id="bills-tbody"></tbody></table>
+          <div class="form-group">
+            <label class="form-label">পদবী *</label>
+            <input
+              type="text"
+              id="ef-desig"
+              class="form-input"
+              placeholder="টি আই"
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">IC নং</label>
+            <input
+              type="text"
+              id="ef-ic"
+              class="form-input"
+              placeholder="২৯৩৫"
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">বিভাগ</label>
+            <input
+              type="text"
+              id="ef-dept"
+              class="form-input"
+              value="ট্রাফিক"
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">শাখা</label>
+            <input
+              type="text"
+              id="ef-branch"
+              class="form-input"
+              value="রাজস্ব ও রিটার্ন"
+            />
+          </div>
+          <div class="form-group full">
+            <label class="form-label">মূল বেতন (টাকা) *</label>
+            <input
+              type="number"
+              id="ef-basic"
+              class="form-input"
+              placeholder="০"
+              oninput="updateHourlyHint()"
+            />
+            <div class="form-hint">
+              ঘন্টা হার: <strong id="hourly-hint">—</strong> (বেতন ÷ ১০৪)
+            </div>
+          </div>
+        </div>
+        <div class="flex gap-2 mt-3">
+          <button class="btn btn-primary w-full" onclick="saveEmp()">
+            ✓ সংরক্ষণ
+          </button>
+          <button class="btn btn-outline" onclick="closeEmpModal()">
+            বাতিল
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADMIN MODAL -->
+    <div class="overlay" id="adminOverlay">
+      <div class="modal" style="width: 380px">
+        <div class="modal-head">
+          <div class="modal-title">🔐 Admin Access</div>
+          <button class="modal-x" onclick="closeAdminModal()">✕</button>
+        </div>
+
+        <!-- LOGIN SECTION -->
+        <div id="adminLoginSection">
+          <div
+            style="
+              display: flex;
+              gap: 0;
+              margin-bottom: 16px;
+              border: 1px solid var(--border);
+              border-radius: 7px;
+              overflow: hidden;
+            "
+          >
+            <button
+              id="adminTabLogin"
+              onclick="showAdminTab('login')"
+              style="
+                flex: 1;
+                padding: 8px;
+                background: rgba(201, 151, 58, 0.15);
+                color: var(--gold2);
+                border: none;
+                font-family: inherit;
+                font-size: 13px;
+                cursor: pointer;
+                font-weight: 600;
+              "
+              class="active"
+            >
+              লগইন
+            </button>
+            <button
+              id="adminTabChange"
+              onclick="showAdminTab('change')"
+              style="
+                flex: 1;
+                padding: 8px;
+                background: transparent;
+                color: var(--muted);
+                border: none;
+                font-family: inherit;
+                font-size: 13px;
+                cursor: pointer;
+              "
+            >
+              পাসওয়ার্ড পরিবর্তন
+            </button>
+          </div>
+
+          <!-- Login Tab -->
+          <div id="adminLoginTab">
+            <div class="form-group" style="margin-bottom: 10px">
+              <label class="form-label">Admin ID</label>
+              <input
+                type="text"
+                id="adminIdInput"
+                class="form-input"
+                placeholder="admin ID দিন"
+                autocomplete="off"
+              />
+            </div>
+            <div class="form-group mb-3">
+              <label class="form-label">পাসওয়ার্ড</label>
+              <input
+                type="password"
+                id="adminPwInput"
+                class="form-input"
+                placeholder="পাসওয়ার্ড দিন"
+              />
+            </div>
+            <div
+              id="adminError"
+              style="
+                color: #e88;
+                font-size: 12px;
+                margin-bottom: 8px;
+                min-height: 16px;
+              "
+            ></div>
+            <button class="btn btn-primary w-full" onclick="tryAdminLogin()">
+              🔓 লগইন
+            </button>
+          </div>
+
+          <!-- Change Password Tab -->
+          <div id="adminChangeTab" style="display: none">
+            <div class="form-group mb-3" style="margin-bottom: 10px">
+              <label class="form-label">বর্তমান পাসওয়ার্ড</label>
+              <input
+                type="password"
+                id="adminCurPw"
+                class="form-input"
+                placeholder="বর্তমান পাসওয়ার্ড"
+              />
+            </div>
+            <div class="form-group mb-3" style="margin-bottom: 10px">
+              <label class="form-label">নতুন পাসওয়ার্ড</label>
+              <input
+                type="password"
+                id="adminNewPw"
+                class="form-input"
+                placeholder="নূন্যতম ৬ অক্ষর"
+              />
+            </div>
+            <div class="form-group mb-3" style="margin-bottom: 10px">
+              <label class="form-label">নতুন পাসওয়ার্ড নিশ্চিত করুন</label>
+              <input
+                type="password"
+                id="adminNewPw2"
+                class="form-input"
+                placeholder="আবার দিন"
+              />
+            </div>
+            <div
+              id="adminErrorChange"
+              style="
+                color: #e88;
+                font-size: 12px;
+                margin-bottom: 8px;
+                min-height: 16px;
+              "
+            ></div>
+            <button
+              class="btn btn-primary w-full"
+              onclick="changeAdminPassword()"
+            >
+              ✓ পাসওয়ার্ড পরিবর্তন করুন
+            </button>
+          </div>
+        </div>
+
+        <!-- LOGOUT SECTION (shown when already admin) -->
+        <div
+          id="adminLogoutSection"
+          style="
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+          "
+        >
+          <div style="font-size: 32px; margin-bottom: 10px">🔐</div>
+          <div
+            style="color: var(--gold2); font-weight: 700; margin-bottom: 6px"
+          >
+            Admin Mode চালু আছে
+          </div>
+          <div
+            style="color: var(--muted); font-size: 12px; margin-bottom: 16px"
+          >
+            আপনি এখন কর্মচারী সম্পাদনা ও মুছতে পারবেন
+          </div>
+          <div class="flex gap-2">
+            <button
+              class="btn btn-outline w-full"
+              onclick="openChangePwFromAdmin()"
+            >
+              🔑 পাসওয়ার্ড পরিবর্তন
+            </button>
+            <button class="btn btn-danger w-full" onclick="adminLogout()">
+              🔒 লগআউট
+            </button>
           </div>
         </div>
       </div>
-
-      <!-- EMPLOYEES -->
-      <div class="view" id="view-employees">
-        <div class="card">
-          <div class="card-head">
-            <div><div class="card-title">কর্মচারী ডেটাবেস</div><div class="card-sub">Employee records</div></div>
-            <button class="btn btn-primary" onclick="openEmpModal()">＋ কর্মচারী যোগ</button>
-          </div>
-          <div class="tbl-wrap">
-            <table class="dt"><thead><tr>
-              <th>নাম</th><th>পদবী</th><th>বিভাগ</th><th>শাখা</th><th>মূল বেতন</th><th>IC নং</th><th>ঘন্টা হার</th><th>Action</th>
-            </tr></thead><tbody id="emp-tbody"></tbody></table>
+    </div>
+    <div class="overlay" id="printOverlay">
+      <div class="modal" style="width: 860px; max-width: 98vw; padding: 18px">
+        <div class="modal-head">
+          <div class="modal-title">🖨️ প্রিন্ট প্রিভিউ — A4</div>
+          <div class="flex gap-2 items-center">
+            <button class="btn btn-primary btn-sm" onclick="doPrint()">
+              🖨️ প্রিন্ট
+            </button>
+            <button class="modal-x" onclick="closePrint()">✕</button>
           </div>
         </div>
-      </div>
-
-    </div>
-  </div>
-</div>
-
-<!-- EMPLOYEE MODAL -->
-<div class="overlay" id="empOverlay">
-  <div class="modal">
-    <div class="modal-head">
-      <div class="modal-title" id="empModalTitle">কর্মচারী যোগ</div>
-      <button class="modal-x" onclick="closeEmpModal()">✕</button>
-    </div>
-    <div class="form-grid">
-      <div class="form-group full">
-        <label class="form-label">পূর্ণ নাম *</label>
-        <input type="text" id="ef-name" class="form-input" placeholder="মোঃ নাম">
-      </div>
-      <div class="form-group">
-        <label class="form-label">পদবী *</label>
-        <input type="text" id="ef-desig" class="form-input" placeholder="টি আই">
-      </div>
-      <div class="form-group">
-        <label class="form-label">IC নং</label>
-        <input type="text" id="ef-ic" class="form-input" placeholder="২৯৩৫">
-      </div>
-      <div class="form-group">
-        <label class="form-label">বিভাগ</label>
-        <input type="text" id="ef-dept" class="form-input" value="ট্রাফিক">
-      </div>
-      <div class="form-group">
-        <label class="form-label">শাখা</label>
-        <input type="text" id="ef-branch" class="form-input" value="রাজস্ব ও রিটার্ন">
-      </div>
-      <div class="form-group full">
-        <label class="form-label">মূল বেতন (টাকা) *</label>
-        <input type="number" id="ef-basic" class="form-input" placeholder="০" oninput="updateHourlyHint()">
-        <div class="form-hint">ঘন্টা হার: <strong id="hourly-hint">—</strong> (বেতন ÷ ১০৪)</div>
-      </div>
-    </div>
-    <div class="flex gap-2 mt-3">
-      <button class="btn btn-primary w-full" onclick="saveEmp()">✓ সংরক্ষণ</button>
-      <button class="btn btn-outline" onclick="closeEmpModal()">বাতিল</button>
-    </div>
-  </div>
-</div>
-
-<!-- ADMIN MODAL -->
-<div class="overlay" id="adminOverlay">
-  <div class="modal" style="width:380px">
-    <div class="modal-head">
-      <div class="modal-title">🔐 Admin Access</div>
-      <button class="modal-x" onclick="closeAdminModal()">✕</button>
-    </div>
-
-    <!-- LOGIN SECTION -->
-    <div id="adminLoginSection">
-      <div style="display:flex;gap:0;margin-bottom:16px;border:1px solid var(--border);border-radius:7px;overflow:hidden;">
-        <button id="adminTabLogin" onclick="showAdminTab('login')"
-          style="flex:1;padding:8px;background:rgba(201,151,58,.15);color:var(--gold2);border:none;font-family:inherit;font-size:13px;cursor:pointer;font-weight:600;"
-          class="active">লগইন</button>
-        <button id="adminTabChange" onclick="showAdminTab('change')"
-          style="flex:1;padding:8px;background:transparent;color:var(--muted);border:none;font-family:inherit;font-size:13px;cursor:pointer;"
-          >পাসওয়ার্ড পরিবর্তন</button>
-      </div>
-
-      <!-- Login Tab -->
-      <div id="adminLoginTab">
-        <div class="form-group" style="margin-bottom:10px">
-          <label class="form-label">Admin ID</label>
-          <input type="text" id="adminIdInput" class="form-input" placeholder="admin ID দিন" autocomplete="off">
-        </div>
-        <div class="form-group mb-3">
-          <label class="form-label">পাসওয়ার্ড</label>
-          <input type="password" id="adminPwInput" class="form-input" placeholder="পাসওয়ার্ড দিন">
-        </div>
-        <div id="adminError" style="color:#e88;font-size:12px;margin-bottom:8px;min-height:16px;"></div>
-        <button class="btn btn-primary w-full" onclick="tryAdminLogin()">🔓 লগইন</button>
-      </div>
-
-      <!-- Change Password Tab -->
-      <div id="adminChangeTab" style="display:none">
-        <div class="form-group mb-3" style="margin-bottom:10px">
-          <label class="form-label">বর্তমান পাসওয়ার্ড</label>
-          <input type="password" id="adminCurPw" class="form-input" placeholder="বর্তমান পাসওয়ার্ড">
-        </div>
-        <div class="form-group mb-3" style="margin-bottom:10px">
-          <label class="form-label">নতুন পাসওয়ার্ড</label>
-          <input type="password" id="adminNewPw" class="form-input" placeholder="নূন্যতম ৬ অক্ষর">
-        </div>
-        <div class="form-group mb-3" style="margin-bottom:10px">
-          <label class="form-label">নতুন পাসওয়ার্ড নিশ্চিত করুন</label>
-          <input type="password" id="adminNewPw2" class="form-input" placeholder="আবার দিন">
-        </div>
-        <div id="adminErrorChange" style="color:#e88;font-size:12px;margin-bottom:8px;min-height:16px;"></div>
-        <button class="btn btn-primary w-full" onclick="changeAdminPassword()">✓ পাসওয়ার্ড পরিবর্তন করুন</button>
+        <div class="print-preview" id="printPreview"></div>
       </div>
     </div>
 
-    <!-- LOGOUT SECTION (shown when already admin) -->
-    <div id="adminLogoutSection" style="display:none;flex-direction:column;align-items:center;text-align:center;">
-      <div style="font-size:32px;margin-bottom:10px;">🔐</div>
-      <div style="color:var(--gold2);font-weight:700;margin-bottom:6px;">Admin Mode চালু আছে</div>
-      <div style="color:var(--muted);font-size:12px;margin-bottom:16px;">আপনি এখন কর্মচারী সম্পাদনা ও মুছতে পারবেন</div>
-      <div class="flex gap-2">
-        <button class="btn btn-outline w-full" onclick="openChangePwFromAdmin()">🔑 পাসওয়ার্ড পরিবর্তন</button>
-        <button class="btn btn-danger w-full" onclick="adminLogout()">🔒 লগআউট</button>
-      </div>
-    </div>
-  </div>
-</div>
-<div class="overlay" id="printOverlay">
-  <div class="modal" style="width:860px;max-width:98vw;padding:18px">
-    <div class="modal-head">
-      <div class="modal-title">🖨️ প্রিন্ট প্রিভিউ — A4</div>
-      <div class="flex gap-2 items-center">
-        <button class="btn btn-primary btn-sm" onclick="doPrint()">🖨️ প্রিন্ট</button>
-        <button class="modal-x" onclick="closePrint()">✕</button>
-      </div>
-    </div>
-    <div class="print-preview" id="printPreview"></div>
-  </div>
-</div>
-
-
-<!-- App Script -->
-<script src="app.js"></script>
-
-</body>
+    <!-- App Script -->
+    <script src="app.js"></script>
+  </body>
 </html>
