@@ -5,20 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OT Bill — মোংলা বন্দর কর্তৃপক্ষ</title>
 
-    <!-- Favicon -->
     <link
       rel="icon"
       type="image/svg+xml"
-      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%231e3a5f'/><text x='50' y='60' font-size='60' font-weight='bold' text-anchor='middle' dominant-baseline='middle' fill='%23f39c12'>⚓</text></svg>"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%230d1220'/><text x='50' y='62' font-size='58' font-weight='bold' text-anchor='middle' dominant-baseline='middle' fill='%23d4a574'>⚓</text></svg>"
     />
 
-    <!-- Nikosh Bengali Font -->
-    <link href="https://fonts.maateen.me/nikosh/font.css" rel="stylesheet" />
-
-    <!-- App Styles -->
     <link rel="stylesheet" href="styles.css" />
 
-    <!-- Firebase SDK (module) -->
+    <!-- Firebase SDK -->
     <script type="module">
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
       import {
@@ -46,9 +41,9 @@
       const app = initializeApp(firebaseConfig);
       const db = getFirestore(app);
 
-      window._fs = {
+      globalThis._fs = {
         db,
-        collection: (name) => collection(db, name),
+        collection: (n) => collection(db, n),
         getDocs,
         addDoc,
         setDoc,
@@ -59,98 +54,110 @@
         query,
       };
 
-      window.dispatchEvent(new Event("firebaseReady"));
+      globalThis.dispatchEvent(new Event("firebaseReady"));
     </script>
   </head>
+
   <body>
     <!-- TOASTS -->
     <div class="toasts" id="toasts"></div>
 
-    <!-- PRINT AREA -->
+    <!-- PRINT AREA (off-screen) -->
     <div class="print-area" id="printArea"></div>
 
-    <!-- APP -->
+    <!-- APP SHELL -->
     <div class="layout">
-      <!-- SIDEBAR -->
+      <!-- ═══════════════ SIDEBAR ═══════════════ -->
       <aside class="sidebar">
         <div class="sidebar-brand">
           <div class="brand-icon">⚓</div>
           <div class="brand-title">মোংলা বন্দর কর্তৃপক্ষ</div>
           <div class="brand-sub">OT Bill Management</div>
         </div>
+
         <nav class="nav">
           <div class="nav-group-label">প্রধান মেনু</div>
-          <div
+
+          <button
+            type="button"
             class="nav-item active"
             data-view="dashboard"
             onclick="goView('dashboard')"
           >
             <span class="ni">📊</span> ড্যাশবোর্ড
-          </div>
-          <div
+          </button>
+          <button
+            type="button"
             class="nav-item"
             data-view="new-bill"
             onclick="goView('new-bill')"
           >
             <span class="ni">📝</span> নতুন OT বিল
-          </div>
-          <div
+          </button>
+          <button
+            type="button"
             class="nav-item"
             data-view="all-bills"
             onclick="goView('all-bills')"
           >
             <span class="ni">📋</span> সকল বিল
-          </div>
+          </button>
+
           <div class="nav-group-label">ব্যবস্থাপনা</div>
-          <div
+          <button
+            type="button"
             class="nav-item"
             data-view="employees"
             onclick="goView('employees')"
           >
             <span class="ni">👤</span> কর্মচারী ডেটাবেস
-          </div>
+          </button>
         </nav>
+
         <div class="sidebar-foot">
-          ট্রাফিক — রাজস্ব ও রিটার্ন শাখা<br />মোংলা, বাগেরহাট<br /><span
-            style="font-size: 11.5px; color: var(--gold)"
-            >© <span id="cpYear"></span> samiulAsumel. All rights
-            reserved.</span
-          >
+          ট্রাফিক — রাজস্ব ও রিটার্ন শাখা<br />
+          <span style="font-size: calc(10.5px * 1.35)">মোংলা, বাগেরহাট</span
+          ><br />
+          <span style="font-size: 11px; color: var(--gold)">
+            © <span id="cpYear"></span> samiulAsumel. All rights reserved.
+          </span>
         </div>
       </aside>
 
-      <!-- MAIN -->
+      <!-- ═══════════════ MAIN ═══════════════ -->
       <div class="main">
+        <!-- TOPBAR -->
         <div class="topbar">
-          <div>
-            <div class="topbar-title" id="viewTitle">ড্যাশবোর্ড</div>
-            <div class="topbar-sub">অতিরিক্ত কাজের বিল ব্যবস্থাপনা</div>
+          <div class="topbar-left">
+            <div>
+              <div class="topbar-title" id="viewTitle">ড্যাশবোর্ড</div>
+              <div class="topbar-sub">অতিরিক্ত কাজের বিল ব্যবস্থাপনা</div>
+            </div>
           </div>
-          <div class="flex gap-2 items-center">
-            <span id="fbStatus" style="margin-right: 4px">⏳</span>
-            <span
+
+          <div class="topbar-right">
+            <div class="topbar-clock" id="liveClock">
+              <span>🕐</span><strong>--:--:--</strong>
+            </div>
+            <span id="fbStatus" style="margin-right: 2px">⏳</span>
+            <button
               id="adminBadge"
-              style="
-                display: none;
-                align-items: center;
-                gap: 5px;
-                background: rgba(217, 92, 92, 0.15);
-                border: 1px solid rgba(217, 92, 92, 0.3);
-                color: #e88;
-                padding: 4px 10px;
-                border-radius: 6px;
-                font-size: 12px;
-                font-weight: 600;
-              "
-              >🔐 Admin Mode</span
+              type="button"
+              class="btn btn-outline btn-sm"
+              style="display: none"
+              onclick="openAdminModal()"
             >
-            <button class="btn btn-primary" onclick="goView('new-bill')">
+              🔐 Admin Mode
+            </button>
+            <button class="btn btn-primary btn-sm" onclick="goView('new-bill')">
               ＋ নতুন বিল
             </button>
           </div>
         </div>
+
+        <!-- PAGE CONTENT -->
         <div class="page">
-          <!-- DASHBOARD -->
+          <!-- ─── DASHBOARD ─── -->
           <div class="view active" id="view-dashboard">
             <div class="stats" id="statsRow">
               <div class="stat">
@@ -174,6 +181,7 @@
                 <div class="stat-lbl">মোট টাকা</div>
               </div>
             </div>
+
             <div class="card">
               <div class="card-head">
                 <div>
@@ -205,9 +213,28 @@
             </div>
           </div>
 
-          <!-- NEW BILL -->
+          <!-- ─── NEW BILL ─── -->
           <div class="view" id="view-new-bill">
-            <!-- Step 1: Select Employee -->
+            <!-- Step Indicator -->
+            <div class="steps">
+              <div class="step active" id="step-ind-1">
+                <div class="step-num">১</div>
+                <div class="step-info">
+                  <div class="step-title">কর্মচারী নির্বাচন</div>
+                  <div class="step-desc">Select employee for the bill</div>
+                </div>
+              </div>
+              <div class="step-arrow">›</div>
+              <div class="step" id="step-ind-2">
+                <div class="step-num">২</div>
+                <div class="step-info">
+                  <div class="step-title">OT এন্ট্রি</div>
+                  <div class="step-desc">Enter overtime hours per day</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 1: Employee selector -->
             <div class="card" id="card-step1">
               <div class="card-head">
                 <div>
@@ -228,6 +255,7 @@
                 </button>
               </div>
             </div>
+
             <!-- Step 2: OT Entries -->
             <div id="card-step2" style="display: none">
               <div class="card">
@@ -243,12 +271,14 @@
                     ← কর্মচারী পরিবর্তন
                   </button>
                 </div>
-                <div
-                  class="flex gap-2 mb-3"
-                  style="flex-wrap: wrap; align-items: flex-end"
-                >
-                  <div class="form-group" style="min-width: 160px">
-                    <label class="form-label">মাস</label>
+
+                <!-- Controls row -->
+                <div class="bill-controls">
+                  <div
+                    class="form-group"
+                    style="min-width: 155px; margin-bottom: 0"
+                  >
+                    <label class="form-label" for="billMonth">মাস</label>
                     <input
                       type="month"
                       id="billMonth"
@@ -256,8 +286,13 @@
                       onchange="onMonthChange()"
                     />
                   </div>
-                  <div class="form-group" style="min-width: 160px">
-                    <label class="form-label">মূল বেতন (টাকা)</label>
+                  <div
+                    class="form-group"
+                    style="min-width: 155px; margin-bottom: 0"
+                  >
+                    <label class="form-label" for="billBasic"
+                      >মূল বেতন (টাকা)</label
+                    >
                     <input
                       type="number"
                       id="billBasic"
@@ -265,32 +300,59 @@
                       oninput="recalc()"
                     />
                   </div>
-                  <div
-                    class="flex gap-2 items-center"
-                    style="margin-bottom: 2px"
-                  >
+                  <div class="flex gap-2 items-center" style="flex-wrap: wrap">
                     <span class="text-muted text-sm">Default সময়:</span>
-                    <select
-                      id="defFrom"
-                      class="form-input"
-                      style="width: 110px"
-                      onchange=""
-                    ></select>
+                    <div class="flex items-center gap-1">
+                      <button
+                        class="btn btn-outline btn-xs"
+                        onclick="adjustTime('defFrom', -1)"
+                      >
+                        −
+                      </button>
+                      <select
+                        id="defFrom"
+                        class="form-input"
+                        style="width: 110px"
+                        onchange="onDefTimeChange()"
+                      ></select>
+                      <button
+                        class="btn btn-outline btn-xs"
+                        onclick="adjustTime('defFrom', 1)"
+                      >
+                        +
+                      </button>
+                    </div>
                     <span class="text-muted">—</span>
-                    <select
-                      id="defTo"
-                      class="form-input"
-                      style="width: 110px"
-                      onchange=""
-                    ></select>
+                    <div class="flex items-center gap-1">
+                      <button
+                        class="btn btn-outline btn-xs"
+                        onclick="adjustTime('defTo', -1)"
+                      >
+                        −
+                      </button>
+                      <select
+                        id="defTo"
+                        class="form-input"
+                        style="width: 110px"
+                        onchange="onDefTimeChange()"
+                      ></select>
+                      <button
+                        class="btn btn-outline btn-xs"
+                        onclick="adjustTime('defTo', 1)"
+                      >
+                        +
+                      </button>
+                    </div>
                     <button
                       class="btn btn-outline btn-sm"
                       onclick="applyDefTime()"
                     >
-                      সব-এ দিন
+                      সব দিন
                     </button>
                   </div>
                 </div>
+
+                <!-- OT Table -->
                 <div class="ot-wrap">
                   <table class="ot-tbl" id="otTable">
                     <thead>
@@ -317,7 +379,6 @@
                           colspan="6"
                           style="
                             text-align: right;
-                            padding: 7px 10px;
                             color: var(--gold);
                             font-weight: 700;
                             font-size: 12px;
@@ -335,25 +396,30 @@
                   </table>
                 </div>
               </div>
-              <div class="form-grid">
+
+              <!-- Summary + Actions -->
+              <div class="form-grid" style="padding: 0 0 20px; gap: 16px">
                 <div class="summary-box">
                   <div class="sum-row">
-                    <span class="text-muted">মোট OT ঘন্টা</span
-                    ><span class="sv" id="sm-hrs">০</span>
+                    <span class="text-muted">মোট OT ঘন্টা</span>
+                    <span class="sv" id="sm-hrs">০</span>
                   </div>
                   <div class="sum-row">
-                    <span class="text-muted">ঘন্টা প্রতি হার</span
-                    ><span class="sv" id="sm-rate">০ টাকা</span>
+                    <span class="text-muted">ঘন্টা প্রতি হার</span>
+                    <span class="sv" id="sm-rate">০ টাকা</span>
                   </div>
                   <div class="sum-row sum-total">
-                    <span class="text-muted">মোট প্রদেয়</span
-                    ><span class="sv" id="sm-total">৳ ০</span>
+                    <span class="text-muted">মোট প্রদেয়</span>
+                    <span class="sv" id="sm-total">৳ ০</span>
                   </div>
                   <div class="sum-words" id="sm-words">—</div>
                 </div>
-                <div class="flex" style="flex-direction: column; gap: 10px">
-                  <div class="form-group">
-                    <label class="form-label">নোট (ঐচ্ছিক)</label>
+
+                <div class="flex flex-col gap-2">
+                  <div class="form-group" style="flex: 1">
+                    <label class="form-label" for="billNote"
+                      >নোট (ঐচ্ছিক)</label
+                    >
                     <textarea
                       id="billNote"
                       class="form-input"
@@ -361,7 +427,7 @@
                       placeholder="অতিরিক্ত মন্তব্য..."
                     ></textarea>
                   </div>
-                  <div class="flex gap-2 mt-2">
+                  <div class="flex gap-2">
                     <button class="btn btn-success w-full" onclick="saveBill()">
                       💾 সংরক্ষণ
                     </button>
@@ -374,20 +440,20 @@
             </div>
           </div>
 
-          <!-- ALL BILLS -->
+          <!-- ─── ALL BILLS ─── -->
           <div class="view" id="view-all-bills">
             <div class="card">
               <div class="card-head">
                 <div>
                   <div class="card-title">সকল বিল</div>
-                  <div class="card-sub">Complete history</div>
+                  <div class="card-sub">Complete billing history</div>
                 </div>
                 <div class="search">
                   <input
                     type="text"
                     id="billSearch"
                     class="form-input"
-                    placeholder="নাম বা মাস খুঁজুন..."
+                    placeholder="🔍 নাম বা মাস খুঁজুন..."
                     oninput="filterBills(this.value)"
                     style="width: 220px"
                   />
@@ -414,13 +480,13 @@
             </div>
           </div>
 
-          <!-- EMPLOYEES -->
+          <!-- ─── EMPLOYEES ─── -->
           <div class="view" id="view-employees">
             <div class="card">
               <div class="card-head">
                 <div>
                   <div class="card-title">কর্মচারী ডেটাবেস</div>
-                  <div class="card-sub">Employee records</div>
+                  <div class="card-sub">Employee records &amp; management</div>
                 </div>
                 <button class="btn btn-primary" onclick="openEmpModal()">
                   ＋ কর্মচারী যোগ
@@ -446,19 +512,23 @@
             </div>
           </div>
         </div>
+        <!-- /.page -->
       </div>
+      <!-- /.main -->
     </div>
+    <!-- /.layout -->
 
-    <!-- EMPLOYEE MODAL -->
+    <!-- ═══════════════ EMPLOYEE MODAL ═══════════════ -->
     <div class="overlay" id="empOverlay">
       <div class="modal">
         <div class="modal-head">
           <div class="modal-title" id="empModalTitle">কর্মচারী যোগ</div>
           <button class="modal-x" onclick="closeEmpModal()">✕</button>
         </div>
+
         <div class="form-grid">
           <div class="form-group full">
-            <label class="form-label">পূর্ণ নাম *</label>
+            <label class="form-label" for="ef-name">পূর্ণ নাম *</label>
             <input
               type="text"
               id="ef-name"
@@ -467,7 +537,7 @@
             />
           </div>
           <div class="form-group">
-            <label class="form-label">পদবী *</label>
+            <label class="form-label" for="ef-desig">পদবী *</label>
             <input
               type="text"
               id="ef-desig"
@@ -476,7 +546,7 @@
             />
           </div>
           <div class="form-group">
-            <label class="form-label">IC নং</label>
+            <label class="form-label" for="ef-ic">IC নং</label>
             <input
               type="text"
               id="ef-ic"
@@ -485,7 +555,7 @@
             />
           </div>
           <div class="form-group">
-            <label class="form-label">বিভাগ</label>
+            <label class="form-label" for="ef-dept">বিভাগ</label>
             <input
               type="text"
               id="ef-dept"
@@ -494,7 +564,7 @@
             />
           </div>
           <div class="form-group">
-            <label class="form-label">শাখা</label>
+            <label class="form-label" for="ef-branch">শাখা</label>
             <input
               type="text"
               id="ef-branch"
@@ -503,7 +573,7 @@
             />
           </div>
           <div class="form-group full">
-            <label class="form-label">মূল বেতন (টাকা) *</label>
+            <label class="form-label" for="ef-basic">মূল বেতন (টাকা) *</label>
             <input
               type="number"
               id="ef-basic"
@@ -516,6 +586,7 @@
             </div>
           </div>
         </div>
+
         <div class="flex gap-2 mt-3">
           <button class="btn btn-primary w-full" onclick="saveEmp()">
             ✓ সংরক্ষণ
@@ -527,66 +598,37 @@
       </div>
     </div>
 
-    <!-- ADMIN MODAL -->
+    <!-- ═══════════════ ADMIN MODAL ═══════════════ -->
     <div class="overlay" id="adminOverlay">
-      <div class="modal" style="width: 380px">
+      <div class="modal" style="width: 390px">
         <div class="modal-head">
           <div class="modal-title">🔐 Admin Access</div>
           <button class="modal-x" onclick="closeAdminModal()">✕</button>
         </div>
 
-        <!-- LOGIN SECTION -->
+        <!-- Login / Change-password section -->
         <div id="adminLoginSection">
-          <div
-            style="
-              display: flex;
-              gap: 0;
-              margin-bottom: 16px;
-              border: 1px solid var(--border);
-              border-radius: 7px;
-              overflow: hidden;
-            "
-          >
+          <div class="admin-tabs">
             <button
               id="adminTabLogin"
+              class="admin-tab active"
               onclick="showAdminTab('login')"
-              style="
-                flex: 1;
-                padding: 8px;
-                background: rgba(201, 151, 58, 0.15);
-                color: var(--gold2);
-                border: none;
-                font-family: inherit;
-                font-size: 13px;
-                cursor: pointer;
-                font-weight: 600;
-              "
-              class="active"
             >
               লগইন
             </button>
             <button
               id="adminTabChange"
+              class="admin-tab"
               onclick="showAdminTab('change')"
-              style="
-                flex: 1;
-                padding: 8px;
-                background: transparent;
-                color: var(--muted);
-                border: none;
-                font-family: inherit;
-                font-size: 13px;
-                cursor: pointer;
-              "
             >
               পাসওয়ার্ড পরিবর্তন
             </button>
           </div>
 
-          <!-- Login Tab -->
+          <!-- Login tab -->
           <div id="adminLoginTab">
             <div class="form-group" style="margin-bottom: 10px">
-              <label class="form-label">Admin ID</label>
+              <label class="form-label" for="adminIdInput">Admin ID</label>
               <input
                 type="text"
                 id="adminIdInput"
@@ -596,7 +638,7 @@
               />
             </div>
             <div class="form-group mb-3">
-              <label class="form-label">পাসওয়ার্ড</label>
+              <label class="form-label" for="adminPwInput">পাসওয়ার্ড</label>
               <input
                 type="password"
                 id="adminPwInput"
@@ -607,9 +649,9 @@
             <div
               id="adminError"
               style="
-                color: #e88;
+                color: #fca5a5;
                 font-size: 12px;
-                margin-bottom: 8px;
+                margin-bottom: 10px;
                 min-height: 16px;
               "
             ></div>
@@ -618,10 +660,12 @@
             </button>
           </div>
 
-          <!-- Change Password Tab -->
+          <!-- Change password tab -->
           <div id="adminChangeTab" style="display: none">
-            <div class="form-group mb-3" style="margin-bottom: 10px">
-              <label class="form-label">বর্তমান পাসওয়ার্ড</label>
+            <div class="form-group" style="margin-bottom: 10px">
+              <label class="form-label" for="adminCurPw"
+                >বর্তমান পাসওয়ার্ড</label
+              >
               <input
                 type="password"
                 id="adminCurPw"
@@ -629,8 +673,8 @@
                 placeholder="বর্তমান পাসওয়ার্ড"
               />
             </div>
-            <div class="form-group mb-3" style="margin-bottom: 10px">
-              <label class="form-label">নতুন পাসওয়ার্ড</label>
+            <div class="form-group" style="margin-bottom: 10px">
+              <label class="form-label" for="adminNewPw">নতুন পাসওয়ার্ড</label>
               <input
                 type="password"
                 id="adminNewPw"
@@ -639,7 +683,9 @@
               />
             </div>
             <div class="form-group mb-3" style="margin-bottom: 10px">
-              <label class="form-label">নতুন পাসওয়ার্ড নিশ্চিত করুন</label>
+              <label class="form-label" for="adminNewPw2"
+                >নতুন পাসওয়ার্ড নিশ্চিত করুন</label
+              >
               <input
                 type="password"
                 id="adminNewPw2"
@@ -650,9 +696,9 @@
             <div
               id="adminErrorChange"
               style="
-                color: #e88;
+                color: #fca5a5;
                 font-size: 12px;
-                margin-bottom: 8px;
+                margin-bottom: 10px;
                 min-height: 16px;
               "
             ></div>
@@ -665,7 +711,7 @@
           </div>
         </div>
 
-        <!-- LOGOUT SECTION (shown when already admin) -->
+        <!-- Logout section (shown when already admin) -->
         <div
           id="adminLogoutSection"
           style="
@@ -673,20 +719,17 @@
             flex-direction: column;
             align-items: center;
             text-align: center;
+            gap: 12px;
           "
         >
-          <div style="font-size: 32px; margin-bottom: 10px">🔐</div>
-          <div
-            style="color: var(--gold2); font-weight: 700; margin-bottom: 6px"
-          >
+          <div style="font-size: 36px; margin-top: 4px">🔐</div>
+          <div style="color: var(--gold2); font-weight: 700; font-size: 16px">
             Admin Mode চালু আছে
           </div>
-          <div
-            style="color: var(--muted); font-size: 12px; margin-bottom: 16px"
-          >
+          <div style="color: var(--muted); font-size: 12px; line-height: 1.7">
             আপনি এখন কর্মচারী সম্পাদনা ও মুছতে পারবেন
           </div>
-          <div class="flex gap-2">
+          <div class="flex gap-2" style="width: 100%; margin-top: 4px">
             <button
               class="btn btn-outline w-full"
               onclick="openChangePwFromAdmin()"
@@ -700,8 +743,10 @@
         </div>
       </div>
     </div>
+
+    <!-- ═══════════════ PRINT PREVIEW MODAL ═══════════════ -->
     <div class="overlay" id="printOverlay">
-      <div class="modal" style="width: 860px; max-width: 98vw; padding: 18px">
+      <div class="modal" style="width: 880px; max-width: 98vw; padding: 20px">
         <div class="modal-head">
           <div class="modal-title">🖨️ প্রিন্ট প্রিভিউ — A4</div>
           <div class="flex gap-2 items-center">
@@ -715,7 +760,45 @@
       </div>
     </div>
 
-    <!-- App Script -->
+    <!-- App logic -->
     <script src="app.js"></script>
+
+    <!-- UI extras: clock + step indicator sync -->
+    <script>
+      /* Live clock */
+      function _tick() {
+        const n = new Date();
+        const pad = (x) => String(x).padStart(2, "0");
+        const t =
+          pad(n.getHours()) +
+          ":" +
+          pad(n.getMinutes()) +
+          ":" +
+          pad(n.getSeconds());
+        const el = document.getElementById("liveClock");
+        if (el) el.innerHTML = "<span>🕐</span><strong>" + t + "</strong>";
+      }
+      _tick();
+      setInterval(_tick, 1000);
+
+      /* Step indicator sync — watches card-step2 display toggle */
+      (function () {
+        const s2 = document.getElementById("card-step2");
+        const ind1 = document.getElementById("step-ind-1");
+        const ind2 = document.getElementById("step-ind-2");
+        if (!s2 || !ind1 || !ind2) return;
+
+        function sync() {
+          const open = s2.style.display !== "none";
+          ind1.className = "step " + (open ? "done" : "active");
+          ind2.className = "step " + (open ? "active" : "");
+        }
+
+        new MutationObserver(sync).observe(s2, {
+          attributes: true,
+          attributeFilter: ["style"],
+        });
+      })();
+    </script>
   </body>
 </html>

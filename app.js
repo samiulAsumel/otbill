@@ -1,7 +1,7 @@
 /* ===================================================
    UTILITIES
 =================================================== */
-const bn = (s) => String(s).replace(/[0-9]/g, (d) => "০১২৩৪৫৬৭৮৯"[d]);
+const bn = (s) => String(s).replace(/\d/g, (d) => "০১২৩৪৫৬৭৮৯"[d]);
 
 function bnWords(n) {
   n = Math.round(n);
@@ -156,7 +156,7 @@ function fmtMonthBn(ym) {
 }
 
 function hourlyRate(basic) {
-  return Math.round((+basic || 0) / 104);
+  return Math.ceil((+basic || 0) / 104);
 }
 
 /* ===================================================
@@ -237,7 +237,7 @@ const DB = {
       renderAll();
       return;
     }
-    const { addDoc, collection } = window._fs;
+    const { addDoc, collection } = globalThis._fs;
     try {
       const ref = await addDoc(collection("employees"), data);
       data.id = ref.id;
@@ -255,9 +255,9 @@ const DB = {
       renderAll();
       return;
     }
-    const { db, doc, setDoc } = window._fs;
+    const { doc, setDoc } = globalThis._fs;
     try {
-      await setDoc(doc(db, "employees", id), data);
+      await setDoc(doc(globalThis._fs.db, "employees", id), data);
     } catch (err) {
       toast("আপডেট ব্যর্থ: " + (err.code || err.message), "er");
       throw err;
@@ -271,9 +271,9 @@ const DB = {
       renderAll();
       return;
     }
-    const { db, doc, deleteDoc } = window._fs;
+    const { doc, deleteDoc } = globalThis._fs;
     try {
-      await deleteDoc(doc(db, "employees", id));
+      await deleteDoc(doc(globalThis._fs.db, "employees", id));
     } catch (err) {
       toast("মুছতে ব্যর্থ: " + (err.code || err.message), "er");
       throw err;
@@ -288,9 +288,10 @@ const DB = {
       renderAll();
       return;
     }
-    const { addDoc, collection } = window._fs;
+    const { addDoc, collection } = globalThis._fs;
     try {
-      const { id: _localId, ...docData } = data;
+      const docData = { ...data };
+      delete docData.id;
       const ref = await addDoc(collection("bills"), docData);
       data.id = ref.id;
     } catch (err) {
@@ -306,9 +307,9 @@ const DB = {
       renderAll();
       return;
     }
-    const { db, doc, deleteDoc } = window._fs;
+    const { doc, deleteDoc } = globalThis._fs;
     try {
-      await deleteDoc(doc(db, "bills", id));
+      await deleteDoc(doc(globalThis._fs.db, "bills", id));
     } catch (err) {
       toast("মুছতে ব্যর্থ: " + (err.code || err.message), "er");
       throw err;
@@ -334,7 +335,7 @@ function setStatus(connected) {
 
 // Setup real-time Firestore listeners
 function setupListeners() {
-  const { db, collection, onSnapshot, query, orderBy } = window._fs;
+  const { collection, onSnapshot } = globalThis._fs;
 
   // Employees listener
   onSnapshot(
@@ -368,22 +369,22 @@ function setupListeners() {
 }
 
 async function seedFirestore() {
-  const { addDoc, collection, doc, setDoc } = window._fs;
+  const { doc, setDoc } = globalThis._fs;
   for (const emp of SEED_EMPS) {
     const { id, ...data } = emp;
-    await setDoc(doc(window._fs.db, "employees", id), data);
+    await setDoc(doc(globalThis._fs.db, "employees", id), data);
   }
 }
 
 // Wait for Firebase module to load then start
-window.addEventListener("firebaseReady", async () => {
+globalThis.addEventListener("firebaseReady", async () => {
   _fsReady = true;
   setStatus(true);
   setupListeners();
   toast("☁️ Firebase সংযুক্ত হয়েছে", "ok");
   // Seed once on first-ever install only
   if (!localStorage.getItem("mpa_seeded")) {
-    const { getDocs, collection } = window._fs;
+    const { getDocs, collection } = globalThis._fs;
     const snap = await getDocs(collection("employees"));
     if (snap.empty) await seedFirestore();
     localStorage.setItem("mpa_seeded", "1");
@@ -648,7 +649,7 @@ function openChangePwFromAdmin() {
 }
 
 document.addEventListener("keydown", function (e) {
-  if (e.ctrlKey && e.shiftKey && !e.key.match(/^[a-zA-Z]$/)) {
+  if (e.ctrlKey && e.shiftKey && !/^[a-zA-Z]$/.test(e.key)) {
     e.preventDefault();
     openAdminModal();
   }
@@ -744,37 +745,105 @@ async function delEmp(id) {
   } catch {}
 }
 
+function _icToNum(ic) {
+  if (!ic) return Infinity;
+  const s = String(ic).replace(/[০-৯]/g, (d) =>
+    String("০১২৩৪৫৬৭৮৯".indexOf(d)),
+  );
+  return Math.ceil(Number.parseFloat(s)) || Infinity;
+}
+
+function _normIC(ic) {
+  if (!ic) return "—";
+  const s = String(ic).replace(/[০-৯]/g, (d) =>
+    String("০১২৩৪৫৬৭৮৯".indexOf(d)),
+  );
+  const n = Number.parseFloat(s);
+  return Number.isNaN(n) ? String(ic) : bn(Math.ceil(n));
+}
+
+function _sortEmps(arr) {
+  return [...arr].sort((a, b) => {
+    const d = (a.dept || "").localeCompare(b.dept || "", "bn");
+    if (d !== 0) return d;
+    const br = (a.branch || "").localeCompare(b.branch || "", "bn");
+    if (br !== 0) return br;
+    return _icToNum(a.ic) - _icToNum(b.ic);
+  });
+}
+
 function renderEmpTable() {
-  const emps = DB.emps();
+  const emps = _sortEmps(DB.emps());
   const tbody = document.getElementById("emp-tbody");
   if (!emps.length) {
     tbody.innerHTML =
       '<tr><td colspan="8"><div class="empty"><div class="empty-ico">👤</div><p>কোনো কর্মচারী নেই</p></div></td></tr>';
     return;
   }
-  tbody.innerHTML = emps
-    .map(
-      (e) => `<tr>
-    <td><strong>${e.name}</strong></td>
-    <td><span class="badge badge-blue">${e.desig}</span></td>
-    <td>${e.dept}</td>
-    <td>${e.branch}</td>
-    <td><span class="text-gold">৳ ${(+e.basic).toLocaleString("en-IN")}</span></td>
-    <td>${e.ic || "—"}</td>
-    <td><span class="badge badge-gold">${bn(hourlyRate(e.basic))} টাকা</span></td>
-    <td>
-      <div class="flex gap-2">
-        ${
-          isAdmin
-            ? `<button class="btn btn-outline btn-xs" onclick="openEmpModal('${e.id}')">✏️</button>
-        <button class="btn btn-danger btn-xs" onclick="delEmp('${e.id}')">🗑️</button>`
-            : '<span class="text-muted text-xs">—</span>'
-        }
-      </div>
-    </td>
-  </tr>`,
-    )
-    .join("");
+
+  const groups = {};
+  emps.forEach((e) => {
+    const dk = e.dept || "—";
+    const bk = e.branch || "—";
+    if (!groups[dk]) groups[dk] = {};
+    if (!groups[dk][bk]) groups[dk][bk] = [];
+    groups[dk][bk].push(e);
+  });
+
+  let html = "";
+  let di = 0;
+  for (const dept of Object.keys(groups)) {
+    const branches = groups[dept];
+    const total = Object.values(branches).reduce((s, a) => s + a.length, 0);
+    const dk = `et${di++}`;
+
+    html += `<tr class="acc-tbl-dept" onclick="_accToggleDept('${dk}')">
+      <td colspan="8">
+        <span class="acc-arrow" id="${dk}a">▼</span>
+        <strong style="color:var(--gold2);margin-left:6px">${dept}</strong>
+        <span class="acc-count">${bn(total)} জন</span>
+      </td>
+    </tr>`;
+
+    let bi = 0;
+    for (const branch of Object.keys(branches)) {
+      const bk = `${dk}_${bi++}`;
+      const bEmps = branches[branch];
+
+      html += `<tr class="acc-tbl-branch acc-tbl-dept-${dk}" data-dk="${dk}" data-bk="${bk}"
+        onclick="_accToggleBranch('${dk}','${bk}')">
+        <td colspan="8">
+          <span class="acc-arrow acc-arrow-sm" id="${bk}a">▼</span>
+          <span style="color:var(--text-secondary);margin-left:6px">${branch}</span>
+          <span class="acc-count">${bn(bEmps.length)} জন</span>
+        </td>
+      </tr>`;
+
+      bEmps.forEach((e) => {
+        html += `<tr class="acc-tbl-emp acc-tbl-dept-${dk} acc-tbl-branch-${bk}" data-dk="${dk}" data-bk="${bk}">
+          <td><strong>${e.name}</strong></td>
+          <td><span class="badge badge-blue">${e.desig}</span></td>
+          <td>${e.dept}</td>
+          <td>${e.branch}</td>
+          <td><span class="text-gold">৳ ${(+e.basic).toLocaleString("en-IN")}</span></td>
+          <td>${_normIC(e.ic)}</td>
+          <td><span class="badge badge-gold">${bn(hourlyRate(e.basic))} টাকা</span></td>
+          <td>
+            <div class="flex gap-2">
+              ${
+                isAdmin
+                  ? `<button class="btn btn-outline btn-xs" onclick="openEmpModal('${e.id}')">✏️</button>
+                   <button class="btn btn-danger btn-xs" onclick="delEmp('${e.id}')">🗑️</button>`
+                  : '<span class="text-muted text-xs">—</span>'
+              }
+            </div>
+          </td>
+        </tr>`;
+      });
+    }
+  }
+
+  tbody.innerHTML = html;
 }
 
 /* ===================================================
@@ -783,35 +852,119 @@ function renderEmpTable() {
 let selEmpId = null;
 
 function renderEmpGrid() {
-  const emps = DB.emps();
-  const grid = document.getElementById("empGrid");
+  const emps = _sortEmps(DB.emps());
+  const container = document.getElementById("empGrid");
   const empty = document.getElementById("empEmpty");
   if (!emps.length) {
-    grid.innerHTML = "";
+    container.innerHTML = "";
     empty.style.display = "block";
     return;
   }
   empty.style.display = "none";
-  grid.innerHTML = emps
-    .map(
-      (e) => `
-    <div class="emp-card ${selEmpId === e.id ? "selected" : ""}" id="ec-${e.id}">
-      <div class="emp-acts">
-        ${
-          isAdmin
-            ? `<button class="btn btn-outline btn-xs" onclick="event.stopPropagation();openEmpModal('${e.id}')">✏️</button>
-        <button class="btn btn-danger btn-xs" onclick="event.stopPropagation();delEmp('${e.id}')">🗑️</button>`
-            : ""
+
+  const groups = {};
+  emps.forEach((e) => {
+    const dk = e.dept || "—";
+    const bk = e.branch || "—";
+    if (!groups[dk]) groups[dk] = {};
+    if (!groups[dk][bk]) groups[dk][bk] = [];
+    groups[dk][bk].push(e);
+  });
+
+  let html = "";
+  let di = 0;
+  for (const dept of Object.keys(groups)) {
+    const branches = groups[dept];
+    const total = Object.values(branches).reduce((s, a) => s + a.length, 0);
+    const dk = `eg${di++}`;
+
+    html += `<div class="acc-dept">
+      <div class="acc-dept-hd" onclick="_accToggle('${dk}b','${dk}a')">
+        <span class="acc-arrow" id="${dk}a">▼</span>
+        <span class="acc-dept-name">${dept}</span>
+        <span class="acc-count">${bn(total)} জন</span>
+      </div>
+      <div class="acc-dept-bd" id="${dk}b">`;
+
+    let bi = 0;
+    for (const branch of Object.keys(branches)) {
+      const bk = `${dk}_${bi++}`;
+      const bEmps = branches[branch];
+
+      html += `<div class="acc-branch">
+        <div class="acc-branch-hd" onclick="_accToggle('${bk}b','${bk}a')">
+          <span class="acc-arrow acc-arrow-sm" id="${bk}a">▼</span>
+          <span class="acc-branch-name">${branch}</span>
+          <span class="acc-count">${bn(bEmps.length)} জন</span>
+        </div>
+        <div class="acc-branch-bd" id="${bk}b">
+          <div class="acc-emp-inner">`;
+
+      bEmps.forEach((e) => {
+        html += `<div class="emp-card ${selEmpId === e.id ? "selected" : ""}" id="ec-${e.id}">
+          <div class="emp-acts">
+            ${
+              isAdmin
+                ? `<button class="btn btn-outline btn-xs" onclick="event.stopPropagation();openEmpModal('${e.id}')">✏️</button>
+                 <button class="btn btn-danger btn-xs" onclick="event.stopPropagation();delEmp('${e.id}')">🗑️</button>`
+                : ""
+            }
+          </div>
+          <div class="emp-card-body" onclick="selectEmp('${e.id}')">
+            <div class="emp-name">${e.name}</div>
+            <div class="emp-meta">${e.desig} · IC: ${_normIC(e.ic)}<br>বেতন: ৳ ${(+e.basic).toLocaleString("en-IN")}<br>হার: ${bn(hourlyRate(e.basic))} টাকা/ঘন্টা</div>
+          </div>
+        </div>`;
+      });
+
+      html += `</div></div></div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  container.innerHTML = html;
+}
+
+function _accToggle(bodyId, arrowId) {
+  const body = document.getElementById(bodyId);
+  const arrow = document.getElementById(arrowId);
+  if (!body) return;
+  const isOpen = body.style.display !== "none";
+  body.style.display = isOpen ? "none" : "";
+  if (arrow) arrow.textContent = isOpen ? "▶" : "▼";
+}
+
+function _accToggleDept(dk) {
+  const arrow = document.getElementById(dk + "a");
+  const isOpen = arrow?.textContent === "▼";
+  if (arrow) arrow.textContent = isOpen ? "▶" : "▼";
+  document
+    .querySelectorAll(`.acc-tbl-dept-${dk}`)
+    .forEach((r) => (r.style.display = isOpen ? "none" : ""));
+  if (!isOpen) {
+    // Re-expanding: restore each branch to its own collapse state
+    document
+      .querySelectorAll(`.acc-tbl-branch[data-dk="${dk}"]`)
+      .forEach((br) => {
+        br.style.display = "";
+        const bk = br.dataset.bk;
+        const ba = document.getElementById(bk + "a");
+        if (ba?.textContent === "▶") {
+          document
+            .querySelectorAll(`.acc-tbl-branch-${bk}`)
+            .forEach((er) => (er.style.display = "none"));
         }
-      </div>
-      <div class="emp-card-body" onclick="selectEmp('${e.id}')">
-        <div class="emp-name">${e.name}</div>
-        <div class="emp-meta">${e.desig} · IC: ${e.ic || "—"}<br>বেতন: ৳ ${(+e.basic).toLocaleString("en-IN")}<br>হার: ${bn(hourlyRate(e.basic))} টাকা/ঘন্টা</div>
-      </div>
-    </div>
-  `,
-    )
-    .join("");
+      });
+  }
+}
+
+function _accToggleBranch(dk, bk) {
+  const arrow = document.getElementById(bk + "a");
+  const isOpen = arrow?.textContent === "▼";
+  if (arrow) arrow.textContent = isOpen ? "▶" : "▼";
+  document
+    .querySelectorAll(`.acc-tbl-branch-${bk}`)
+    .forEach((r) => (r.style.display = isOpen ? "none" : ""));
 }
 
 function selectEmp(id) {
@@ -820,7 +973,7 @@ function selectEmp(id) {
   if (!emp) return;
   document.getElementById("step2EmpName").textContent = emp.name;
   document.getElementById("step2EmpMeta").textContent =
-    `${emp.desig} | ${emp.dept} | ${emp.branch} | IC: ${emp.ic}`;
+    `${emp.desig} | ${emp.dept} | ${emp.branch} | IC: ${_normIC(emp.ic)}`;
   document.getElementById("billBasic").value = emp.basic;
   const now = new Date();
   const defMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -867,12 +1020,14 @@ function initDefaultSelects() {
 }
 
 function applyDefTime() {
-  const from = document.getElementById("defFrom").value;
-  const to = document.getElementById("defTo").value;
+  onDefTimeChange();
+}
+
+function updateCheckedRowsDefTime(from, to) {
   document.querySelectorAll("#otTbody tr").forEach((tr) => {
     const d = +tr.dataset.d;
     const cb = document.getElementById(`cb-${d}`);
-    if (cb && cb.checked) {
+    if (cb?.checked) {
       const fs = document.getElementById(`from-${d}`);
       const ts = document.getElementById(`to-${d}`);
       if (fs) fs.value = from;
@@ -880,6 +1035,22 @@ function applyDefTime() {
       calcRowHrs(d);
     }
   });
+}
+
+function adjustTime(id, delta) {
+  const sel = document.getElementById(id);
+  const opts = Array.from(sel.options);
+  const currentIdx = sel.selectedIndex;
+  const newIdx = Math.max(0, Math.min(opts.length - 1, currentIdx + delta));
+  sel.selectedIndex = newIdx;
+  onDefTimeChange();
+}
+
+function onDefTimeChange() {
+  // Update all checked rows with new default times
+  const from = document.getElementById("defFrom").value;
+  const to = document.getElementById("defTo").value;
+  updateCheckedRowsDefTime(from, to);
   recalc();
 }
 
@@ -919,7 +1090,7 @@ function hrsFromTime(from, to) {
   const [fh, fm] = from.split(":").map(Number);
   const [th, tm] = to.split(":").map(Number);
   const diff = th * 60 + tm - (fh * 60 + fm);
-  return diff > 0 ? parseFloat((diff / 60).toFixed(1)) : 0;
+  return diff > 0 ? Number.parseFloat((diff / 60).toFixed(1)) : 0;
 }
 
 function generateRows(ym) {
@@ -931,10 +1102,12 @@ function generateRows(ym) {
   let html = "";
   for (let d = 1; d <= days; d++) {
     const dow = new Date(y, m - 1, d).getDay();
-    const isFri = dow === 5,
-      isSat = dow === 6;
+    const isFri = dow === 5;
+    const isSat = dow === 6;
     const dateStr = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    const dayCls = isFri ? "is-fri" : isSat ? "is-sat" : "";
+    let dayCls = "";
+    if (isFri) dayCls = "is-fri";
+    else if (isSat) dayCls = "is-sat";
     html += `<tr class="row-off ${dayCls}" id="otr-${d}" data-d="${d}" data-date="${dateStr}">
       <td><input type="checkbox" class="ot-cb" id="cb-${d}" onchange="toggleRow(${d})"></td>
       <td style="color:var(--muted);font-size:12px" id="sn-${d}">—</td>
@@ -1001,20 +1174,22 @@ function recalc() {
     const d = +tr.dataset.d;
     const cb = document.getElementById(`cb-${d}`);
     const sn = document.getElementById(`sn-${d}`);
-    if (cb && cb.checked) {
+    if (cb?.checked) {
       const raw = document.getElementById(`h-${d}`)?.textContent || "0";
       const h =
-        parseFloat(raw.replace(/[০-৯]/g, (c) => "০১২৩৪৫৬৭৮৯".indexOf(c))) || 0;
+        Number.parseFloat(
+          raw.replace(/[০-৯]/g, (c) => "০১২৩৪৫৬৭৮৯".indexOf(c)),
+        ) || 0;
       totHrs += h;
       selDays++;
       if (sn) sn.textContent = bn(serial++);
-    } else {
-      if (sn) sn.textContent = "—";
+    } else if (sn) {
+      sn.textContent = "—";
     }
   });
   const basic = +document.getElementById("billBasic").value || 0;
   const rate = hourlyRate(basic);
-  const amt = Math.round(totHrs * rate);
+  const amt = Math.ceil(totHrs * rate);
   document.getElementById("selDays").textContent = bn(selDays);
   document.getElementById("totHrsCell").textContent = bn(totHrs);
   document.getElementById("sm-hrs").textContent = bn(totHrs) + " ঘন্টা";
@@ -1030,12 +1205,14 @@ function getCheckedRows() {
   document.querySelectorAll("#otTbody tr").forEach((tr) => {
     const d = +tr.dataset.d;
     const cb = document.getElementById(`cb-${d}`);
-    if (!cb || !cb.checked) return;
+    if (!cb?.checked) return;
     const fs = document.getElementById(`from-${d}`)?.value || "16:00";
     const ts = document.getElementById(`to-${d}`)?.value || "21:00";
     const raw = document.getElementById(`h-${d}`)?.textContent || "0";
     const h =
-      parseFloat(raw.replace(/[০-৯]/g, (c) => "০১২৩৪৫৬৭৮৯".indexOf(c))) || 0;
+      Number.parseFloat(
+        raw.replace(/[০-৯]/g, (c) => "০১২৩৪৫৬৭৮৯".indexOf(c)),
+      ) || 0;
     rows.push({
       date: tr.dataset.date,
       from: fs.replace(":", ""),
@@ -1066,7 +1243,7 @@ async function saveBill() {
   }
   const rate = hourlyRate(basic);
   const totHrs = rows.reduce((s, r) => s + r.hours, 0);
-  const totalAmt = Math.round(totHrs * rate);
+  const totalAmt = Math.ceil(totHrs * rate);
   const bill = {
     id: uid(),
     empId: selEmpId,
@@ -1113,7 +1290,7 @@ function renderBills(filter) {
       return `<tr>
       <td><strong>${emp.name || "—"}</strong></td>
       <td><span class="badge badge-blue">${emp.desig || "—"}</span></td>
-      <td>${emp.ic || "—"}</td>
+      <td>${_normIC(emp.ic)}</td>
       <td>${fmtMonthBn(b.month)}</td>
       <td style="text-align:center">${bn(b.entries?.length || 0)}</td>
       <td><span class="badge badge-gold">${bn(b.totalHours || 0)} ঘন্টা</span></td>
@@ -1166,9 +1343,9 @@ function fmtTime4(t) {
 }
 
 function fmtHrs(h) {
-  const n = parseFloat(h) || 0;
+  const n = Number.parseFloat(h) || 0;
   const i = Math.floor(n);
-  const d = String(Math.round((n - i) * 100)).padStart(2, "0");
+  const d = String(Math.ceil((n - i) * 100)).padStart(2, "0");
   return bn(i) + "." + bn(d);
 }
 
@@ -1229,7 +1406,7 @@ function buildA4(bill, emp) {
     <tr>
       <td class="al" style="padding-top: 1.21806px; padding-bottom: 1.21806px;">মূল বেতনঃ</td><td style="padding-top: 1.21806px; padding-bottom: 1.21806px;">${bnSalary}</td>
       <td style="padding-top: 1.21806px; padding-right:150px; padding-bottom: 1.21806px;"></td>
-      <td class="al" style="padding-top: 1.21806px; padding-bottom: 1.21806px;">আই,সি, নং-</td><td style="padding-top: 1.21806px; padding-bottom: 1.21806px;">${emp.ic || ""}</td>
+      <td class="al" style="padding-top: 1.21806px; padding-bottom: 1.21806px;">আই,সি, নং-</td><td style="padding-top: 1.21806px; padding-bottom: 1.21806px;">${emp.ic ? _normIC(emp.ic) : ""}</td>
     </tr>
   </tbody></table>
 
@@ -1251,12 +1428,12 @@ function buildA4(bill, emp) {
 
   <div class="a4-verify">পরীক্ষা করিলাম সঠিক আছে।</div>
 
-  <table class="a4-ti-tbl" style="margin-top:calc(43px - 5%);margin-bottom:5%">
-    <tr>
+  <table class="a4-ti-tbl" style="margin-top: 9px; margin-bottom: 5px;">
+    <tbody><tr>
       <td style="width:50%">টি আই/শাখা প্রধান</td>
       <td style="width:50%;padding-left:25%">আবেদনকারীর স্বাক্ষর<br>তারিখঃ</td>
     </tr>
-  </table>
+  </tbody></table>
 
   <div class="a4-approval" style="margin-top:8px;">
     <div style="display:flex;align-items:flex-end;gap:2px;">
@@ -1278,10 +1455,49 @@ function buildA4(bill, emp) {
 /* ===================================================
    FIT TO A4 — Phase1: compress gaps; Phase2: table font only
 =================================================== */
+function normalizeA4PageMargins(page) {
+  page.querySelectorAll("*").forEach((el) => {
+    if (getComputedStyle(el).marginTop === "auto") el.style.marginTop = "0";
+  });
+}
+
+function compressA4PageSpacing(page, ratio) {
+  page.querySelectorAll(".a4-ot-tbl td, .a4-ot-tbl th").forEach((el) => {
+    const cs = getComputedStyle(el);
+    const pt = Number.parseFloat(cs.paddingTop) || 0;
+    const pb = Number.parseFloat(cs.paddingBottom) || 0;
+    const lh = Number.parseFloat(cs.lineHeight) || 18;
+    el.style.paddingTop = Math.max(1, pt * ratio) + "px";
+    el.style.paddingBottom = Math.max(1, pb * ratio) + "px";
+    el.style.lineHeight = Math.max(1, lh * ratio) + "px";
+  });
+
+  page.querySelectorAll("*").forEach((el) => {
+    const cs = getComputedStyle(el);
+    ["marginTop", "marginBottom", "paddingTop", "paddingBottom"].forEach(
+      (p) => {
+        const v = Number.parseFloat(cs[p]) || 0;
+        if (v > 1) el.style[p] = Math.max(0, v * ratio) + "px";
+      },
+    );
+  });
+
+  const pp = Number.parseFloat(getComputedStyle(page).paddingTop) || 0;
+  if (pp > 2) page.style.paddingTop = Math.max(2, pp * ratio) + "px";
+}
+
+function compressA4TableFont(tbl, ratio) {
+  tbl.querySelectorAll("td, th").forEach((el) => {
+    const fs = Number.parseFloat(getComputedStyle(el).fontSize) || 14;
+    const lh = Number.parseFloat(getComputedStyle(el).lineHeight) || 18;
+    el.style.fontSize = Math.max(9, fs * ratio) + "px";
+    el.style.lineHeight = Math.max(1, lh * ratio) + "px";
+  });
+}
+
 function fitToA4(page) {
   const A4_H = 1122; // 297mm @ 96dpi
 
-  // Temporarily remove overflow:hidden so scrollHeight reflects true content height
   const origOverflow = page.style.overflow;
   const origHeight = page.style.height;
   page.style.overflow = "visible";
@@ -1293,62 +1509,23 @@ function fitToA4(page) {
     return;
   }
 
-  // Strip 'auto' margins before compression — they are invisible to parseFloat
-  // and cause flex children (e.g. .a4-sigs) to be pushed off-page
-  page.querySelectorAll("*").forEach((el) => {
-    if (getComputedStyle(el).marginTop === "auto") el.style.marginTop = "0";
-  });
+  normalizeA4PageMargins(page);
 
-  // Phase 1: reduce gaps/padding/margin (up to 25 passes)
-  for (let pass = 0; pass < 25; pass++) {
-    if (page.scrollHeight <= A4_H) break;
+  for (let pass = 0; pass < 25 && page.scrollHeight > A4_H; pass++) {
     const ratio = A4_H / page.scrollHeight;
-
-    // Table cell padding & line-height
-    page.querySelectorAll(".a4-ot-tbl td, .a4-ot-tbl th").forEach((el) => {
-      const cs = getComputedStyle(el);
-      const pt = parseFloat(cs.paddingTop) || 0;
-      const pb = parseFloat(cs.paddingBottom) || 0;
-      const lh = parseFloat(cs.lineHeight) || 18;
-      el.style.paddingTop = Math.max(1, pt * ratio) + "px";
-      el.style.paddingBottom = Math.max(1, pb * ratio) + "px";
-      el.style.lineHeight = Math.max(1, lh * ratio) + "px";
-    });
-
-    // All margins & paddings inside the page
-    page.querySelectorAll("*").forEach((el) => {
-      const cs = getComputedStyle(el);
-      ["marginTop", "marginBottom", "paddingTop", "paddingBottom"].forEach(
-        (p) => {
-          const v = parseFloat(cs[p]) || 0;
-          if (v > 1) el.style[p] = Math.max(0, v * ratio) + "px";
-        },
-      );
-    });
-
-    // Page own padding
-    const pp = parseFloat(getComputedStyle(page).paddingTop) || 0;
-    if (pp > 2) page.style.paddingTop = Math.max(2, pp * ratio) + "px";
+    compressA4PageSpacing(page, ratio);
   }
 
-  // Phase 2: still overflowing → reduce table font only (min 9px)
   if (page.scrollHeight > A4_H) {
     const tbl = page.querySelector(".a4-ot-tbl");
     if (tbl) {
-      for (let pass = 0; pass < 20; pass++) {
-        if (page.scrollHeight <= A4_H) break;
+      for (let pass = 0; pass < 20 && page.scrollHeight > A4_H; pass++) {
         const ratio = A4_H / page.scrollHeight;
-        tbl.querySelectorAll("td, th").forEach((el) => {
-          const fs = parseFloat(getComputedStyle(el).fontSize) || 14;
-          const lh = parseFloat(getComputedStyle(el).lineHeight) || 18;
-          el.style.fontSize = Math.max(9, fs * ratio) + "px";
-          el.style.lineHeight = Math.max(1, lh * ratio) + "px";
-        });
+        compressA4TableFont(tbl, ratio);
       }
     }
   }
 
-  // Restore
   page.style.overflow = origOverflow || "hidden";
   page.style.height = origHeight || "297mm";
 }
@@ -1380,7 +1557,7 @@ function doPreviewPrint() {
     rate,
     entries: rows,
     totalHours: totHrs,
-    totalAmt: Math.round(totHrs * rate),
+    totalAmt: Math.ceil(totHrs * rate),
   };
   const emp = DB.emps().find((e) => e.id === selEmpId) || {};
   showPrintModal(bill, emp);
@@ -1456,10 +1633,10 @@ function doPrint() {
   const cleanupPrint = () => {
     document.getElementById("ps")?.remove();
     pa.style.cssText = "display:none;";
-    window.removeEventListener("afterprint", cleanupPrint);
+    globalThis.removeEventListener("afterprint", cleanupPrint);
   };
-  window.addEventListener("afterprint", cleanupPrint);
-  window.print();
+  globalThis.addEventListener("afterprint", cleanupPrint);
+  globalThis.print();
 }
 
 /* ===================================================
