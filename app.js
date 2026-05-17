@@ -215,6 +215,60 @@ const SEED_EMPS = [
 let _emps = [];
 let _bills = [];
 let _fsReady = false;
+let currentUserProfile = null; // { role, empId, ic } from users/{uid}
+let pendingUserProfile = null;
+const ADMIN_LOGIN_ID = "admin";
+const ADMIN_LOGIN_PASSWORD = "sas@911225";
+const LOCAL_SESSION_KEY = "mpa_login_session";
+const LOCAL_USERS_KEY = "mpa_local_users";
+let adminLoginVisible = false;
+
+function _isEmployee() { return currentUserProfile?.role === "employee"; }
+function _myEmpId()    { return currentUserProfile?.empId || null; }
+function _visibleEmps()  {
+  return _isEmployee() ? _emps.filter(e => e.id === _myEmpId()) : _emps;
+}
+function _visibleBills() {
+  return _isEmployee() ? _bills.filter(b => b.empId === _myEmpId()) : _bills;
+}
+
+function _localUsers() {
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function _saveLocalUsers(users) {
+  localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
+}
+
+function startLocalSession(profile) {
+  localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(profile));
+  localStorage.removeItem("mpa_admin_session");
+  currentUserProfile = profile;
+  isAdmin = profile?.role === "admin";
+  showMainApp();
+  renderAll();
+  updateUserChip();
+  updateRoleUi();
+}
+
+function restoreLocalSession() {
+  let profile = null;
+  try {
+    profile = JSON.parse(localStorage.getItem(LOCAL_SESSION_KEY) || "null");
+  } catch {
+    profile = null;
+  }
+  if (!profile && localStorage.getItem("mpa_admin_session") === "1") {
+    profile = { role: "admin" };
+  }
+  if (!profile) return false;
+  startLocalSession(profile);
+  return true;
+}
 
 function _saveLocal() {
   localStorage.setItem("mpa_emps", JSON.stringify(_emps));
@@ -231,16 +285,17 @@ const DB = {
 
   async addEmp(data) {
     if (!_fsReady) {
-      data.id = uid();
+      data.id = _icKey(data.ic) || uid();
       _emps.push(data);
       _saveLocal();
       renderAll();
       return;
     }
-    const { addDoc, collection } = globalThis._fs;
+    const { doc, setDoc, db } = globalThis._fs;
     try {
-      const ref = await addDoc(collection("employees"), data);
-      data.id = ref.id;
+      const id = _icKey(data.ic) || uid();
+      await setDoc(doc(db, "employees", id), data);
+      data.id = id;
     } catch (err) {
       toast("সংরক্ষণ ব্যর্থ: " + (err.code || err.message), "er");
       throw err;
@@ -345,6 +400,7 @@ function setupListeners() {
       renderEmpTable();
       renderEmpGrid();
       renderDash();
+      if (currentUserProfile) updateUserChip();
     },
     (err) => {
       toast("কর্মচারী ডেটা লোড ব্যর্থ: " + (err.code || err.message), "er");
@@ -372,9 +428,61 @@ async function seedFirestore() {
   const { doc, setDoc } = globalThis._fs;
   for (const emp of SEED_EMPS) {
     const { id, ...data } = emp;
-    await setDoc(doc(globalThis._fs.db, "employees", id), data);
+    await setDoc(doc(globalThis._fs.db, "employees", _icKey(data.ic) || id), data);
   }
 }
+
+// Auto sync auth state — load user profile from Firestore
+globalThis.addEventListener("authStateChanged", async ({ detail: { user } }) => {
+  if (!user) {
+    if (restoreLocalSession()) return;
+    currentUserProfile = null;
+    isAdmin = false;
+    showLoginScreen();
+    return;
+  }
+
+  // Load profile from users/{uid}
+  let profile = null;
+  if (_fsReady) {
+    try {
+      const { getDoc, doc, db } = globalThis._fs;
+      const snap = await getDoc(doc(db, "users", user.uid));
+      if (snap.exists()) {
+        profile = snap.data();
+      } else if (pendingUserProfile?.uid === user.uid) {
+        profile = pendingUserProfile.profile;
+      } else if (!user.email.endsWith("@mpa-otbill.local")) {
+        // Real email → treat as admin, auto-create users doc
+        profile = { role: "admin" };
+        const { setDoc, doc: d2, db: db2 } = globalThis._fs;
+        await setDoc(d2(db2, "users", user.uid), profile);
+      } else {
+        const ic = user.email.split("@")[0];
+        const emp = await findEmployeeByIc(ic);
+        if (!emp) {
+          await globalThis._auth.signOut(globalThis._auth.auth);
+          toast("অ্যাকাউন্ট পাওয়া যায়নি, পুনরায় নিবন্ধন করুন", "er");
+          return;
+        }
+        profile = { role: "employee", empId: emp.id, ic };
+        const { setDoc, doc: d2, db: db2 } = globalThis._fs;
+        await setDoc(d2(db2, "users", user.uid), profile);
+      }
+    } catch (err) {
+      toast("প্রোফাইল লোড ব্যর্থ: " + (err.code || err.message), "er");
+      return;
+    }
+  }
+
+  currentUserProfile = profile;
+  if (pendingUserProfile?.uid === user.uid) pendingUserProfile = null;
+  isAdmin = profile?.role === "admin";
+  showMainApp();
+  renderAll();
+  updateUserChip();
+  updateRoleUi();
+});
 
 // Wait for Firebase module to load then start
 globalThis.addEventListener("firebaseReady", async () => {
@@ -457,8 +565,8 @@ function goView(name) {
    DASHBOARD
 =================================================== */
 function renderDash() {
-  const emps = DB.emps(),
-    bills = DB.bills();
+  const emps  = _visibleEmps(),
+    bills = _visibleBills();
   const totHrs = bills.reduce((s, b) => s + (b.totalHours || 0), 0);
   const totAmt = bills.reduce((s, b) => s + (b.totalAmt || 0), 0);
   document.getElementById("s-emp").textContent = bn(emps.length);
@@ -496,180 +604,407 @@ function renderDash() {
 }
 
 /* ===================================================
-   ADMIN MODE — Secure password auth (SHA-256)
-   Default password: MPA@2026
-   Ctrl+Shift to open login / logout
+   LOGIN SCREEN HELPERS
+=================================================== */
+function showLoginScreen() {
+  document.getElementById("loginOverlay").style.display = "flex";
+  document.getElementById("appLayout").style.display = "none";
+  document.getElementById("userChip").style.display = "none";
+  adminLoginVisible = false;
+  switchLoginTab("login");
+  updateLoginModeUi();
+  document.getElementById("loginUsername").focus();
+}
+
+function showMainApp() {
+  document.getElementById("loginOverlay").style.display = "none";
+  document.getElementById("appLayout").style.display = "grid";
+}
+
+function updateUserChip() {
+  const chip = document.getElementById("userChip");
+  chip.style.display = "flex";
+  const badge = document.getElementById("adminBadge");
+
+  if (isAdmin) {
+    const email = globalThis._auth?.auth?.currentUser?.email || "admin";
+    document.getElementById("userChipIcon").textContent = "🔐";
+    document.getElementById("userChipName").textContent = "Admin";
+    document.getElementById("userChipSub").textContent = email;
+    badge.style.display = "inline-flex";
+  } else {
+    const emp = _emps.find(e => e.id === _myEmpId()) || {};
+    document.getElementById("userChipIcon").textContent = "👤";
+    document.getElementById("userChipName").textContent = emp.name || currentUserProfile?.ic || "—";
+    document.getElementById("userChipSub").textContent = `IC: ${currentUserProfile?.ic || "—"} | ${emp.desig || ""}`;
+    badge.style.display = "none";
+  }
+  updateRoleUi();
+}
+
+function switchLoginTab(tab) {
+  document.getElementById("loginForm").style.display = tab === "login" ? "block" : "none";
+  document.getElementById("registerForm").style.display = tab === "register" ? "block" : "none";
+  document.getElementById("loginTabBtn").classList.toggle("active", tab === "login");
+  document.getElementById("registerTabBtn").classList.toggle("active", tab === "register");
+  document.getElementById("loginError").textContent = "";
+  document.getElementById("registerError").textContent = "";
+}
+
+function updateLoginModeUi() {
+  const label = document.getElementById("loginIdLabel");
+  const hint = document.getElementById("loginIdHint");
+  const input = document.getElementById("loginUsername");
+  const registerBtn = document.getElementById("registerTabBtn");
+  if (!label || !hint || !input || !registerBtn) return;
+  label.textContent = adminLoginVisible ? "Admin ID" : "IC নম্বর";
+  hint.textContent = adminLoginVisible ? "Ctrl+Shift click" : "কর্মচারী লগইন";
+  input.placeholder = adminLoginVisible ? "admin" : "আপনার IC নম্বর";
+  if (adminLoginVisible) {
+    input.value = ADMIN_LOGIN_ID;
+    registerBtn.style.display = "none";
+  } else {
+    if (input.value.toLowerCase() === ADMIN_LOGIN_ID) input.value = "";
+    registerBtn.style.display = "";
+  }
+}
+
+async function openAdminLogin() {
+  adminLoginVisible = true;
+  try {
+    localStorage.removeItem(LOCAL_SESSION_KEY);
+    localStorage.removeItem("mpa_admin_session");
+    const { auth, signOut } = globalThis._auth || {};
+    if (auth?.currentUser) await signOut(auth);
+  } catch {}
+  currentUserProfile = null;
+  isAdmin = false;
+  document.getElementById("loginOverlay").style.display = "flex";
+  document.getElementById("appLayout").style.display = "none";
+  switchLoginTab("login");
+  updateLoginModeUi();
+  document.getElementById("loginPassword").value = "";
+  document.getElementById("loginUsername").focus();
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "a") {
+    e.preventDefault();
+    openAdminLogin();
+  }
+});
+
+document.getElementById("loginOverlay").addEventListener("click", (e) => {
+  if (e.ctrlKey && e.shiftKey) {
+    e.preventDefault();
+    openAdminLogin();
+  }
+});
+
+async function doLogin() {
+  const raw = document.getElementById("loginUsername").value.trim();
+  const pw  = document.getElementById("loginPassword").value;
+  if (!raw || !pw) {
+    document.getElementById("loginError").textContent = "ID এবং পাসওয়ার্ড দিন";
+    return;
+  }
+  if (raw.toLowerCase() === ADMIN_LOGIN_ID) {
+    if (!adminLoginVisible) {
+      document.getElementById("loginError").textContent = "Admin লগইনের জন্য Ctrl+Shift ধরে click করুন";
+      return;
+    }
+    const users = _localUsers();
+    const adminPass = users.admin?.password || ADMIN_LOGIN_PASSWORD;
+    if (pw !== adminPass) {
+      document.getElementById("loginError").textContent = "Admin পাসওয়ার্ড ভুল";
+      return;
+    }
+    try {
+      const { auth, signOut } = globalThis._auth || {};
+      if (auth?.currentUser) await signOut(auth);
+    } catch {}
+    if (!users.admin) {
+      users.admin = { password: ADMIN_LOGIN_PASSWORD, profile: { role: "admin" } };
+      _saveLocalUsers(users);
+    }
+    document.getElementById("loginPassword").value = "";
+    startLocalSession({ role: "admin" });
+    return;
+  }
+  const loginId = raw.includes("@") ? raw : _icKey(raw);
+  if (!raw.includes("@") && !loginId) {
+    document.getElementById("loginError").textContent = "সঠিক IC নম্বর দিন";
+    return;
+  }
+  if (!raw.includes("@")) {
+    const users = _localUsers();
+    if (users[`emp:${loginId}`]) {
+      const loggedIn = await localEmployeeLogin(loginId, pw);
+      if (loggedIn) return;
+      return;
+    }
+  }
+  const email = raw.includes("@") ? raw : `${loginId}@mpa-otbill.local`;
+  try {
+    const { auth, signInWithEmailAndPassword } = globalThis._auth;
+    await signInWithEmailAndPassword(auth, email, pw);
+    document.getElementById("loginPassword").value = "";
+    // onAuthStateChanged handles the rest
+  } catch (err) {
+    const code = err.code || "";
+    if (!raw.includes("@") && code === "auth/configuration-not-found") {
+      const loggedIn = await localEmployeeLogin(loginId, pw);
+      if (loggedIn) return;
+    }
+    if (!raw.includes("@") && pw === "123456" && (code === "auth/invalid-credential" || code === "auth/user-not-found")) {
+      const activated = await activateEmployeeLogin(loginId);
+      if (activated) return;
+    }
+    document.getElementById("loginError").textContent =
+      code === "auth/wrong-password" || code === "auth/invalid-credential"
+        ? "পাসওয়ার্ড ভুল!"
+        : code === "auth/user-not-found" || code === "auth/invalid-email"
+        ? "ID নিবন্ধিত নয়"
+        : code === "auth/too-many-requests"
+        ? "অনেক চেষ্টা হয়েছে, কিছুক্ষণ পরে আবার করুন"
+        : "লগইন ব্যর্থ: " + (code || err.message);
+  }
+}
+
+async function activateEmployeeLogin(empId) {
+  const errEl = document.getElementById("loginError");
+  const existingEmp = await findEmployeeByIc(empId);
+  if (!existingEmp) {
+    errEl.textContent = "এই IC নম্বর কর্মচারী তালিকায় নেই";
+    return false;
+  }
+  try {
+    const { auth, createUserWithEmailAndPassword } = globalThis._auth;
+    const cred = await createUserWithEmailAndPassword(auth, `${empId}@mpa-otbill.local`, "123456");
+    const { setDoc, doc, db } = globalThis._fs;
+    const profile = { role: "employee", empId: existingEmp.id, ic: empId };
+    pendingUserProfile = { uid: cred.user.uid, profile };
+    await setDoc(doc(db, "users", cred.user.uid), profile);
+    document.getElementById("loginPassword").value = "";
+    return true;
+  } catch (err) {
+    const code = err.code || "";
+    if (code === "auth/configuration-not-found") {
+      return localEmployeeLogin(empId, "123456");
+    }
+    errEl.textContent =
+      code === "auth/email-already-in-use"
+        ? "এই IC-তে লগইন আছে, বর্তমান পাসওয়ার্ড দিন"
+        : "লগইন তৈরি ব্যর্থ: " + (code || err.message);
+    return false;
+  }
+}
+
+async function localEmployeeLogin(empId, password) {
+  const errEl = document.getElementById("loginError");
+  const emp = await findEmployeeByIc(empId);
+  if (!emp) {
+    errEl.textContent = "এই IC নম্বর কর্মচারী তালিকায় নেই";
+    return false;
+  }
+
+  const users = _localUsers();
+  const key = `emp:${empId}`;
+  if (!users[key]) {
+    if (password !== "123456") {
+      errEl.textContent = "প্রাথমিক পাসওয়ার্ড 123456 দিয়ে প্রথমবার লগইন করুন";
+      return false;
+    }
+    users[key] = {
+      password: "123456",
+      profile: { role: "employee", empId: emp.id, ic: empId },
+    };
+    _saveLocalUsers(users);
+  }
+
+  if (users[key].password !== password) {
+    errEl.textContent = "পাসওয়ার্ড ভুল!";
+    return false;
+  }
+
+  document.getElementById("loginPassword").value = "";
+  startLocalSession(users[key].profile);
+  return true;
+}
+
+async function findEmployeeByIc(empId) {
+  const cached = _emps.find((e) => _icKey(e.ic) === empId || e.id === empId);
+  if (cached) return cached;
+  if (!_fsReady) return null;
+  const { getDoc, doc, db } = globalThis._fs;
+  const direct = await getDoc(doc(db, "employees", empId));
+  if (direct.exists()) return { ...direct.data(), id: direct.id };
+  const { getDocs, collection } = globalThis._fs;
+  const snap = await getDocs(collection("employees"));
+  const found = snap.docs
+    .map((d) => ({ ...d.data(), id: d.id }))
+    .find((e) => _icKey(e.ic) === empId || e.id === empId);
+  if (found) return found;
+  return null;
+}
+
+async function doRegister() {
+  const name = document.getElementById("regName").value.trim();
+  const desig = document.getElementById("regDesig").value.trim();
+  const ic = document.getElementById("regIC").value.trim();
+  const dept = document.getElementById("regDept").value.trim() || "ট্রাফিক";
+  const branch = document.getElementById("regBranch").value.trim() || "রাজস্ব ও রিটার্ন";
+  const basic = +document.getElementById("regBasic").value || 0;
+  const errEl = document.getElementById("registerError");
+  const empId = _icKey(ic);
+  const existingEmp = _emps.find(e => _icKey(e.ic) === empId || e.id === empId);
+  const pw = "123456";
+
+  if (!empId) { errEl.textContent = "সঠিক IC নম্বর দিন"; return; }
+  if (!existingEmp) {
+    if (!name) { errEl.textContent = "পূর্ণ নাম দিন"; return; }
+    if (!desig) { errEl.textContent = "পদবী দিন"; return; }
+    if (!basic) { errEl.textContent = "মূল বেতন দিন"; return; }
+  }
+
+  try {
+    const { auth, createUserWithEmailAndPassword } = globalThis._auth;
+    const cred = await createUserWithEmailAndPassword(auth, `${empId}@mpa-otbill.local`, pw);
+    const { setDoc, doc, db } = globalThis._fs;
+    const profile = {
+      role: "employee",
+      empId: existingEmp?.id || empId,
+      ic: empId,
+    };
+    pendingUserProfile = { uid: cred.user.uid, profile };
+    if (!existingEmp) {
+      await setDoc(doc(db, "employees", empId), { name, desig, ic: empId, dept, branch, basic });
+    }
+    await setDoc(doc(db, "users", cred.user.uid), profile);
+    ["regName", "regDesig", "regIC", "regBasic"].forEach((id) => {
+      document.getElementById(id).value = "";
+    });
+    // onAuthStateChanged fires automatically
+  } catch (err) {
+    const code = err.code || "";
+    if (code === "auth/configuration-not-found") {
+      try {
+        const { setDoc, doc, db } = globalThis._fs;
+        if (!existingEmp) {
+          await setDoc(doc(db, "employees", empId), { name, desig, ic: empId, dept, branch, basic });
+        }
+        const users = _localUsers();
+        users[`emp:${empId}`] = {
+          password: "123456",
+          profile: { role: "employee", empId: existingEmp?.id || empId, ic: empId },
+        };
+        _saveLocalUsers(users);
+        ["regName", "regDesig", "regIC", "regBasic"].forEach((id) => {
+          document.getElementById(id).value = "";
+        });
+        startLocalSession(users[`emp:${empId}`].profile);
+        return;
+      } catch (saveErr) {
+        errEl.textContent = "নিবন্ধন সংরক্ষণ ব্যর্থ: " + (saveErr.code || saveErr.message);
+        return;
+      }
+    }
+    errEl.textContent =
+      code === "auth/email-already-in-use"
+        ? "এই IC নম্বরে ইতিমধ্যে লগইন আছে"
+        : "নিবন্ধন ব্যর্থ: " + (code || err.message);
+  }
+}
+
+async function doLogout() {
+  try {
+    localStorage.removeItem("mpa_admin_session");
+    localStorage.removeItem(LOCAL_SESSION_KEY);
+    const { auth, signOut } = globalThis._auth || {};
+    if (auth) await signOut(auth);
+  } catch {}
+  currentUserProfile = null;
+  isAdmin = false;
+  showLoginScreen();
+  updateRoleUi();
+  // onAuthStateChanged → showLoginScreen()
+}
+
+function openEmpChangePw() {
+  ["empCurPw","empNewPw","empNewPw2"].forEach(id => { document.getElementById(id).value = ""; });
+  document.getElementById("empPwError").textContent = "";
+  document.getElementById("empChangePwOverlay").classList.add("open");
+}
+function closeEmpChangePw() {
+  document.getElementById("empChangePwOverlay").classList.remove("open");
+}
+async function doEmpChangePw() {
+  const cur = document.getElementById("empCurPw").value;
+  const nw  = document.getElementById("empNewPw").value;
+  const nw2 = document.getElementById("empNewPw2").value;
+  const errEl = document.getElementById("empPwError");
+  if (!cur || !nw || !nw2) { errEl.textContent = "সব ঘর পূরণ করুন"; return; }
+  if (nw !== nw2)           { errEl.textContent = "নতুন পাসওয়ার্ড মিলছে না"; return; }
+  if (nw.length < 6)        { errEl.textContent = "পাসওয়ার্ড কমপক্ষে ৬ অক্ষর"; return; }
+  const localSession = localStorage.getItem(LOCAL_SESSION_KEY);
+  if (localSession || !globalThis._auth?.auth?.currentUser) {
+    const users = _localUsers();
+    const key = isAdmin ? "admin" : `emp:${currentUserProfile?.ic}`;
+    const user = users[key] || (isAdmin
+      ? { password: ADMIN_LOGIN_PASSWORD, profile: { role: "admin" } }
+      : null);
+    if (!user) { errEl.textContent = "লোকাল অ্যাকাউন্ট পাওয়া যায়নি"; return; }
+    if (user.password !== cur) { errEl.textContent = "বর্তমান পাসওয়ার্ড ভুল"; return; }
+    user.password = nw;
+    users[key] = user;
+    _saveLocalUsers(users);
+    closeEmpChangePw();
+    toast("পাসওয়ার্ড পরিবর্তন হয়েছে ✓", "ok");
+    return;
+  }
+  try {
+    const { auth, reauthenticateWithCredential, EmailAuthProvider, updatePassword } = globalThis._auth;
+    const user = auth.currentUser;
+    await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, cur));
+    await updatePassword(user, nw);
+    closeEmpChangePw();
+    toast("পাসওয়ার্ড পরিবর্তন হয়েছে ✓", "ok");
+  } catch (err) {
+    const code = err.code || "";
+    errEl.textContent =
+      code === "auth/wrong-password" || code === "auth/invalid-credential"
+        ? "বর্তমান পাসওয়ার্ড ভুল"
+        : "পরিবর্তন ব্যর্থ: " + (code || err.message);
+  }
+}
+
+/* ===================================================
+   ROLE HELPERS
 =================================================== */
 let isAdmin = false;
 
-// SHA-256 hash of default password "MPA@2026"
-const ADMIN_ID = "admin";
-const ADMIN_HASH =
-  "b3172a1c080abf5ec4ee8a514506bd1f04d442804a691d9f9b19928360861560"; // sas@911225
-
-async function sha256(str) {
-  const buf = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(str),
-  );
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-async function tryAdminLogin() {
-  const id = document.getElementById("adminIdInput").value.trim();
-  const pw = document.getElementById("adminPwInput").value;
-  if (!id || !pw) {
-    showAdminError("ID এবং পাসওয়ার্ড দিন");
-    return;
-  }
-  if (id !== ADMIN_ID) {
-    showAdminError("Admin ID ভুল!");
-    document.getElementById("adminIdInput").focus();
-    return;
-  }
-  const hash = await sha256(pw);
-  const stored = localStorage.getItem("mpa_admin_hash") || ADMIN_HASH;
-  if (hash === stored) {
-    closeAdminModal();
-    setAdmin(true);
-  } else {
-    showAdminError("পাসওয়ার্ড ভুল!");
-    document.getElementById("adminPwInput").value = "";
-    document.getElementById("adminPwInput").focus();
-  }
-}
-
-async function changeAdminPassword() {
-  const cur = document.getElementById("adminCurPw").value;
-  const nw = document.getElementById("adminNewPw").value;
-  const nw2 = document.getElementById("adminNewPw2").value;
-  if (!cur || !nw || !nw2) {
-    showAdminError("সব ঘর পূরণ করুন");
-    return;
-  }
-  if (nw !== nw2) {
-    showAdminError("নতুন পাসওয়ার্ড মিলছে না");
-    return;
-  }
-  if (nw.length < 6) {
-    showAdminError("পাসওয়ার্ড কমপক্ষে ৬ অক্ষর");
-    return;
-  }
-  const curHash = await sha256(cur);
-  const stored = localStorage.getItem("mpa_admin_hash") || ADMIN_HASH;
-  if (curHash !== stored) {
-    showAdminError("বর্তমান পাসওয়ার্ড ভুল");
-    return;
-  }
-  const newHash = await sha256(nw);
-  localStorage.setItem("mpa_admin_hash", newHash);
-  document.getElementById("adminCurPw").value = "";
-  document.getElementById("adminNewPw").value = "";
-  document.getElementById("adminNewPw2").value = "";
-  showAdminError("");
-  toast("পাসওয়ার্ড পরিবর্তন হয়েছে ✓", "ok");
-  showAdminTab("login");
-}
-
-function showAdminError(msg) {
-  const el1 = document.getElementById("adminError");
-  const el2 = document.getElementById("adminErrorChange");
-  if (el1) el1.textContent = msg;
-  if (el2) el2.textContent = msg;
-}
-
-function showAdminTab(tab) {
-  document.getElementById("adminLoginTab").style.display =
-    tab === "login" ? "block" : "none";
-  document.getElementById("adminChangeTab").style.display =
-    tab === "change" ? "block" : "none";
-  document
-    .getElementById("adminTabLogin")
-    .classList.toggle("active", tab === "login");
-  document
-    .getElementById("adminTabChange")
-    .classList.toggle("active", tab === "change");
-  showAdminError("");
-}
-
-function openAdminModal() {
-  if (isAdmin) {
-    // Already admin — offer logout or change password
-    document.getElementById("adminLogoutSection").style.display = "flex";
-    document.getElementById("adminLoginSection").style.display = "none";
-  } else {
-    document.getElementById("adminLogoutSection").style.display = "none";
-    document.getElementById("adminLoginSection").style.display = "block";
-    showAdminTab("login");
-  }
-  document.getElementById("adminOverlay").classList.add("open");
-  setTimeout(() => {
-    document.getElementById("adminIdInput")?.focus();
-  }, 100);
-}
-
-function closeAdminModal() {
-  document.getElementById("adminOverlay").classList.remove("open");
-  const id = document.getElementById("adminIdInput");
-  const pw = document.getElementById("adminPwInput");
-  if (id) id.value = "";
-  if (pw) pw.value = "";
-  showAdminError("");
-}
-
-function setAdmin(val) {
-  isAdmin = val;
-  const badge = document.getElementById("adminBadge");
-  if (isAdmin) {
-    badge.style.display = "inline-flex";
-    toast("🔐 Admin Mode চালু", "ok");
-  } else {
-    badge.style.display = "none";
-    toast("🔒 Admin Mode বন্ধ", "ok");
-  }
-  renderEmpTable();
-  renderEmpGrid();
-}
-
-function adminLogout() {
-  closeAdminModal();
-  setAdmin(false);
-}
-
-function openChangePwFromAdmin() {
-  document.getElementById("adminLogoutSection").style.display = "none";
-  document.getElementById("adminLoginSection").style.display = "block";
-  showAdminTab("change");
-  ["adminCurPw", "adminNewPw", "adminNewPw2"].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.value = "";
+function updateRoleUi() {
+  document.querySelectorAll(".admin-only").forEach((el) => {
+    el.style.display = isAdmin ? "" : "none";
   });
 }
-
-document.addEventListener("keydown", function (e) {
-  if (e.ctrlKey && e.shiftKey && !/^[a-zA-Z]$/.test(e.key)) {
-    e.preventDefault();
-    openAdminModal();
-  }
-});
-
-// Enter key in password field
-document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("adminPwInput")?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") tryAdminLogin();
-  });
-});
 
 /* ===================================================
    EMPLOYEE CRUD
 =================================================== */
 let editEmpId = null;
 
+function canEditEmp(id) {
+  return isAdmin || (_isEmployee() && id === _myEmpId());
+}
+
 function openEmpModal(id) {
-  if (id && !isAdmin) {
-    toast("শুধু Admin সম্পাদনা করতে পারবেন", "er");
+  if (!id && !isAdmin) {
+    toast("শুধু Admin নতুন কর্মচারী যোগ করতে পারবেন", "er");
+    return;
+  }
+  if (id && !canEditEmp(id)) {
+    toast("আপনি শুধু নিজের তথ্য সম্পাদনা করতে পারবেন", "er");
     return;
   }
   editEmpId = id || null;
@@ -695,6 +1030,7 @@ function openEmpModal(id) {
     document.getElementById("ef-branch").value = "রাজস্ব ও রিটার্ন";
     document.getElementById("hourly-hint").textContent = "—";
   }
+  document.getElementById("ef-ic").readOnly = !isAdmin;
 }
 
 function closeEmpModal() {
@@ -715,11 +1051,32 @@ async function saveEmp() {
   const dept = document.getElementById("ef-dept").value.trim();
   const branch = document.getElementById("ef-branch").value.trim();
   const basic = +document.getElementById("ef-basic").value || 0;
-  if (!name || !desig || !basic) {
-    toast("নাম, পদবী ও মূল বেতন আবশ্যক", "er");
+  const empId = _icKey(ic);
+  if (!editEmpId && !isAdmin) {
+    toast("শুধু Admin নতুন কর্মচারী যোগ করতে পারবেন", "er");
     return;
   }
-  const data = { name, desig, ic, dept, branch, basic };
+  if (editEmpId && !canEditEmp(editEmpId)) {
+    toast("আপনি শুধু নিজের তথ্য সম্পাদনা করতে পারবেন", "er");
+    return;
+  }
+  if (!name || !desig || !empId || !basic) {
+    toast("নাম, পদবী, IC ও মূল বেতন আবশ্যক", "er");
+    return;
+  }
+  if (!editEmpId && _emps.some(e => _icKey(e.ic) === empId || e.id === empId)) {
+    toast("এই IC নম্বরে কর্মচারী আগে থেকেই আছে", "er");
+    return;
+  }
+  const original = editEmpId ? _emps.find((e) => e.id === editEmpId) : null;
+  const data = {
+    name,
+    desig,
+    ic: isAdmin ? ic : (original?.ic || ic),
+    dept,
+    branch,
+    basic,
+  };
   try {
     if (editEmpId) {
       await DB.updateEmp(editEmpId, data);
@@ -745,6 +1102,32 @@ async function delEmp(id) {
   } catch {}
 }
 
+function adminResetEmpPassword(id) {
+  if (!isAdmin) {
+    toast("শুধু Admin পাসওয়ার্ড পরিবর্তন করতে পারবেন", "er");
+    return;
+  }
+  const emp = _emps.find((e) => e.id === id);
+  if (!emp) {
+    toast("কর্মচারী পাওয়া যায়নি", "er");
+    return;
+  }
+  const empId = _icKey(emp.ic) || id;
+  const next = prompt(`${emp.name} - নতুন পাসওয়ার্ড দিন`, "123456");
+  if (next === null) return;
+  if (next.length < 6) {
+    toast("পাসওয়ার্ড কমপক্ষে ৬ অক্ষর", "er");
+    return;
+  }
+  const users = _localUsers();
+  users[`emp:${empId}`] = {
+    password: next,
+    profile: { role: "employee", empId: emp.id, ic: empId },
+  };
+  _saveLocalUsers(users);
+  toast("পাসওয়ার্ড পরিবর্তন হয়েছে ✓", "ok");
+}
+
 function _icToNum(ic) {
   if (!ic) return Infinity;
   const s = String(ic).replace(/[০-৯]/g, (d) =>
@@ -762,6 +1145,26 @@ function _normIC(ic) {
   return Number.isNaN(n) ? String(ic) : bn(Math.ceil(n));
 }
 
+function _oldIcKeyDraft(ic) {
+  /*
+  const s = String(ic || "")
+    .replace(/[০-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/\D/g, "");
+  return s.replace(/^0+/, "") || "";
+  */
+}
+
+function _icKey(ic) {
+  return String(ic || "")
+    .replace(/./g, (ch) => {
+      const code = ch.charCodeAt(0);
+      if (code >= 0x09e6 && code <= 0x09ef) return String(code - 0x09e6);
+      if (code >= 48 && code <= 57) return ch;
+      return "";
+    })
+    .replace(/^0+/, "");
+}
+
 function _sortEmps(arr) {
   return [...arr].sort((a, b) => {
     const d = (a.dept || "").localeCompare(b.dept || "", "bn");
@@ -773,7 +1176,7 @@ function _sortEmps(arr) {
 }
 
 function renderEmpTable() {
-  const emps = _sortEmps(DB.emps());
+  const emps = _sortEmps(_visibleEmps());
   const tbody = document.getElementById("emp-tbody");
   if (!emps.length) {
     tbody.innerHTML =
@@ -831,9 +1234,10 @@ function renderEmpTable() {
           <td>
             <div class="flex gap-2">
               ${
-                isAdmin
+                canEditEmp(e.id)
                   ? `<button class="btn btn-outline btn-xs" onclick="openEmpModal('${e.id}')">✏️</button>
-                   <button class="btn btn-danger btn-xs" onclick="delEmp('${e.id}')">🗑️</button>`
+                   ${isAdmin ? `<button class="btn btn-outline btn-xs" onclick="adminResetEmpPassword('${e.id}')">🔑</button>` : ""}
+                   ${isAdmin ? `<button class="btn btn-danger btn-xs" onclick="delEmp('${e.id}')">🗑️</button>` : ""}`
                   : '<span class="text-muted text-xs">—</span>'
               }
             </div>
@@ -852,7 +1256,7 @@ function renderEmpTable() {
 let selEmpId = null;
 
 function renderEmpGrid() {
-  const emps = _sortEmps(DB.emps());
+  const emps = _sortEmps(_visibleEmps());
   const container = document.getElementById("empGrid");
   const empty = document.getElementById("empEmpty");
   if (!emps.length) {
@@ -904,9 +1308,10 @@ function renderEmpGrid() {
         html += `<div class="emp-card ${selEmpId === e.id ? "selected" : ""}" id="ec-${e.id}">
           <div class="emp-acts">
             ${
-              isAdmin
+              canEditEmp(e.id)
                 ? `<button class="btn btn-outline btn-xs" onclick="event.stopPropagation();openEmpModal('${e.id}')">✏️</button>
-                 <button class="btn btn-danger btn-xs" onclick="event.stopPropagation();delEmp('${e.id}')">🗑️</button>`
+                 ${isAdmin ? `<button class="btn btn-outline btn-xs" onclick="event.stopPropagation();adminResetEmpPassword('${e.id}')">🔑</button>` : ""}
+                 ${isAdmin ? `<button class="btn btn-danger btn-xs" onclick="event.stopPropagation();delEmp('${e.id}')">🗑️</button>` : ""}`
                 : ""
             }
           </div>
@@ -967,7 +1372,11 @@ function _accToggleBranch(dk, bk) {
     .forEach((r) => (r.style.display = isOpen ? "none" : ""));
 }
 
-function selectEmp(id) {
+async function selectEmp(id) {
+  if (_isEmployee() && id !== _myEmpId()) {
+    toast("আপনি শুধু নিজের তথ্য ব্যবহার করতে পারবেন", "er");
+    return;
+  }
   selEmpId = id;
   const emp = DB.emps().find((e) => e.id === id);
   if (!emp) return;
@@ -979,6 +1388,7 @@ function selectEmp(id) {
   const defMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   document.getElementById("billMonth").value = defMonth;
   document.getElementById("card-step2").style.display = "block";
+  _loadBillDescCard(emp.branch);
   generateRows(defMonth);
   recalc();
   renderEmpGrid();
@@ -988,6 +1398,8 @@ function selectEmp(id) {
 function deselectEmp() {
   selEmpId = null;
   document.getElementById("card-step2").style.display = "none";
+  const dc = document.getElementById("card-bill-desc");
+  if (dc) dc.style.display = "none";
   document.getElementById("otTbody").innerHTML = "";
   renderEmpGrid();
 }
@@ -1254,6 +1666,8 @@ async function saveBill() {
     totalHours: totHrs,
     totalAmt,
     note: document.getElementById("billNote").value,
+    billDesc: document.getElementById("billDescInput").value.trim(),
+    supComment: document.getElementById("supCommentInput").value.trim(),
     createdAt: new Date().toISOString(),
   };
   try {
@@ -1267,8 +1681,8 @@ async function saveBill() {
 =================================================== */
 function renderBills(filter) {
   filter = (filter || "").toLowerCase();
-  const bills = DB.bills();
-  const emps = DB.emps();
+  const bills = _visibleBills();
+  const emps  = _visibleEmps();
   const tbody = document.getElementById("bills-tbody");
   let list = [...bills].reverse();
   if (filter)
@@ -1313,8 +1727,7 @@ function filterBills(v) {
 
 async function delBill(id) {
   if (!isAdmin) {
-    toast("⚠️ Admin লগইন প্রয়োজন", "er");
-    openAdminModal();
+    toast("শুধু Admin মুছতে পারবেন", "er");
     return;
   }
   if (!confirm("এই বিল মুছবেন?")) return;
@@ -1327,10 +1740,58 @@ async function delBill(id) {
 /* ===================================================
    PRINT — A4 GENERATION
 =================================================== */
+const RAJOSBO_BRANCH = "রাজস্ব ও রিটার্ন";
 const BILL_DESC =
   "উল্লেখিত তারিখে অফিস সময়ের পরে বন্দর মাশুল আদায়ের এ্যাসেসমেন্ট প্রস্তুত, বিল আদায়, ব্যাংকে জমা দান, রাজস্ব আয়ের হিসাব এবং মালামাল হ্যান্ডলিং এর প্রতিবেদন প্রস্তুত সহ অন্যান্য দাপ্তরিক জরুরী কাজ করিয়াছি।";
 const SUP_COMMENT =
   "এই মর্মে প্রত্যায়ন করা যাইতেছে যে, সে উল্লেখিত দিনগুলি অফিস সময়ের পরে অবস্থান করিয়া বন্দর মাশুল আদায়ের এ্যাসেসমেন্ট প্রস্তুত, বিল আদায়, ব্যাংকে জমা দান, রাজস্ব আয়ের হিসাব এবং মালামাল হ্যান্ডলিং এর প্রতিবেদন প্রস্তুত সহ অন্যান্য দাপ্তরিক জরুরী কাজ করিয়াছে।";
+
+async function _getBranchDescs() {
+  if (_fsReady) {
+    try {
+      const { getDoc, doc, db } = globalThis._fs;
+      const snap = await getDoc(doc(db, "settings", "branchDescs"));
+      if (snap.exists()) return snap.data();
+    } catch {}
+  }
+  try { return JSON.parse(localStorage.getItem("otb_branch_descs") || "{}"); }
+  catch { return {}; }
+}
+
+async function _saveBranchDescs(descs) {
+  localStorage.setItem("otb_branch_descs", JSON.stringify(descs));
+  if (_fsReady) {
+    try {
+      const { setDoc, doc, db } = globalThis._fs;
+      await setDoc(doc(db, "settings", "branchDescs"), descs);
+    } catch (err) {
+      toast("Firebase সংরক্ষণ ব্যর্থ: " + (err.code || err.message), "er");
+    }
+  }
+}
+
+async function _loadBillDescCard(branch) {
+  const card = document.getElementById("card-bill-desc");
+  if (!card) return;
+  const saved = (await _getBranchDescs())[branch] || {};
+  const defaultDesc = branch === RAJOSBO_BRANCH ? BILL_DESC : "";
+  const defaultSup  = branch === RAJOSBO_BRANCH ? SUP_COMMENT : "";
+  document.getElementById("billDescInput").value = saved.billDesc ?? defaultDesc;
+  document.getElementById("supCommentInput").value = saved.supComment ?? defaultSup;
+  card.style.display = "block";
+}
+
+async function saveBranchDescTemplate() {
+  const emp = DB.emps().find((e) => e.id === selEmpId);
+  if (!emp) return;
+  const descs = await _getBranchDescs();
+  descs[emp.branch] = {
+    billDesc: document.getElementById("billDescInput").value.trim(),
+    supComment: document.getElementById("supCommentInput").value.trim(),
+  };
+  await _saveBranchDescs(descs);
+  toast("'" + emp.branch + "' শাখার টেমপ্লেট সংরক্ষিত হয়েছে ✓");
+}
 
 function fmtDate(ds) {
   const [y, m, d] = ds.split("-");
@@ -1369,8 +1830,8 @@ function buildA4(bill, emp) {
         <td>${fmtTime4(e.from)}</td>
         <td>${fmtTime4(e.to)}</td>
         <td>${fmtHrs(e.hours)} ঘন্টা</td>
-        <td class="dc-cell" rowspan="${rowspan}">${BILL_DESC}</td>
-        <td class="dc-cell" rowspan="${rowspan}">${SUP_COMMENT}</td>
+        <td class="dc-cell" rowspan="${rowspan}">${bill.billDesc || BILL_DESC}</td>
+        <td class="dc-cell" rowspan="${rowspan}">${bill.supComment || SUP_COMMENT}</td>
       </tr>`;
     } else {
       trs += `<tr>
@@ -1550,6 +2011,7 @@ function doPreviewPrint() {
   }
   const rate = hourlyRate(basic);
   const totHrs = rows.reduce((s, r) => s + r.hours, 0);
+  const emp = DB.emps().find((e) => e.id === selEmpId) || {};
   const bill = {
     empId: selEmpId,
     month: document.getElementById("billMonth").value,
@@ -1558,8 +2020,9 @@ function doPreviewPrint() {
     entries: rows,
     totalHours: totHrs,
     totalAmt: Math.ceil(totHrs * rate),
+    billDesc: document.getElementById("billDescInput").value.trim(),
+    supComment: document.getElementById("supCommentInput").value.trim(),
   };
-  const emp = DB.emps().find((e) => e.id === selEmpId) || {};
   showPrintModal(bill, emp);
 }
 
@@ -1648,8 +2111,8 @@ document.getElementById("empOverlay").addEventListener("click", function (e) {
 document.getElementById("printOverlay").addEventListener("click", function (e) {
   if (e.target === this) closePrint();
 });
-document.getElementById("adminOverlay").addEventListener("click", function (e) {
-  if (e.target === this) closeAdminModal();
+document.getElementById("empChangePwOverlay").addEventListener("click", function (e) {
+  if (e.target === this) closeEmpChangePw();
 });
 
 /* ===================================================

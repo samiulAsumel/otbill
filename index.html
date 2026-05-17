@@ -20,6 +20,7 @@
         getFirestore,
         collection,
         getDocs,
+        getDoc,
         addDoc,
         setDoc,
         deleteDoc,
@@ -28,6 +29,16 @@
         orderBy,
         query,
       } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+      import {
+        getAuth,
+        signInWithEmailAndPassword,
+        createUserWithEmailAndPassword,
+        signOut,
+        updatePassword,
+        reauthenticateWithCredential,
+        EmailAuthProvider,
+        onAuthStateChanged,
+      } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
       const firebaseConfig = {
         apiKey: "AIzaSyAK9ubW1oddyWczbOWmkYVSjarVFKmN6C8",
@@ -39,12 +50,14 @@
       };
 
       const app = initializeApp(firebaseConfig);
-      const db = getFirestore(app);
+      const db  = getFirestore(app);
+      const auth = getAuth(app);
 
       globalThis._fs = {
         db,
         collection: (n) => collection(db, n),
         getDocs,
+        getDoc,
         addDoc,
         setDoc,
         deleteDoc,
@@ -53,6 +66,23 @@
         orderBy,
         query,
       };
+
+      globalThis._auth = {
+        auth,
+        signInWithEmailAndPassword,
+        createUserWithEmailAndPassword,
+        signOut,
+        updatePassword,
+        reauthenticateWithCredential,
+        EmailAuthProvider,
+      };
+
+      // Relay auth-state changes into the main (non-module) script
+      onAuthStateChanged(auth, (user) => {
+        globalThis.dispatchEvent(
+          new CustomEvent("authStateChanged", { detail: { user } })
+        );
+      });
 
       globalThis.dispatchEvent(new Event("firebaseReady"));
     </script>
@@ -66,7 +96,7 @@
     <div class="print-area" id="printArea"></div>
 
     <!-- APP SHELL -->
-    <div class="layout">
+    <div class="layout" id="appLayout" style="display:none">
       <!-- ═══════════════ SIDEBAR ═══════════════ -->
       <aside class="sidebar">
         <div class="sidebar-brand">
@@ -140,15 +170,17 @@
               <span>🕐</span><strong>--:--:--</strong>
             </div>
             <span id="fbStatus" style="margin-right: 2px">⏳</span>
-            <button
-              id="adminBadge"
-              type="button"
-              class="btn btn-outline btn-sm"
-              style="display: none"
-              onclick="openAdminModal()"
-            >
-              🔐 Admin Mode
-            </button>
+            <!-- User chip -->
+            <div id="userChip" style="display:none; align-items:center; gap:6px; background:var(--surface2); border:1px solid var(--gold-border); border-radius:var(--r-sm); padding:4px 10px; font-size:12px;">
+              <span id="userChipIcon">👤</span>
+              <div style="line-height:1.3">
+                <div id="userChipName" style="font-weight:600; color:var(--gold2)"></div>
+                <div id="userChipSub" style="font-size:10px; color:var(--muted)"></div>
+              </div>
+              <button id="adminBadge" type="button" class="btn btn-outline btn-xs" style="display:none" onclick="openEmpChangePw()">⚙️ Admin</button>
+              <button class="btn btn-outline btn-xs" onclick="openEmpChangePw()" title="পাসওয়ার্ড পরিবর্তন">🔑</button>
+              <button class="btn btn-danger btn-xs" onclick="doLogout()" title="লগআউট">↩</button>
+            </div>
             <button class="btn btn-primary btn-sm" onclick="goView('new-bill')">
               ＋ নতুন বিল
             </button>
@@ -241,7 +273,7 @@
                   <div class="card-title">ধাপ ১ — কর্মচারী নির্বাচন</div>
                   <div class="card-sub">Select employee to create OT bill</div>
                 </div>
-                <button class="btn btn-outline btn-sm" onclick="openEmpModal()">
+                <button class="btn btn-outline btn-sm admin-only" onclick="openEmpModal()">
                   ＋ নতুন কর্মচারী
                 </button>
               </div>
@@ -250,7 +282,7 @@
                 <div class="empty-ico">👤</div>
                 <h3>কোনো কর্মচারী নেই</h3>
                 <p>প্রথমে কর্মচারী যোগ করুন</p>
-                <button class="btn btn-primary mt-3" onclick="openEmpModal()">
+                <button class="btn btn-primary mt-3 admin-only" onclick="openEmpModal()">
                   ＋ কর্মচারী যোগ
                 </button>
               </div>
@@ -397,6 +429,45 @@
                 </div>
               </div>
 
+              <!-- Work Description Card (hidden for রাজস্ব ও রিটার্ন) -->
+              <div class="card" id="card-bill-desc" style="display:none; margin-top:12px;">
+                <div class="card-head">
+                  <div>
+                    <div class="card-title">কাজের বিবরণ</div>
+                    <div class="card-sub">প্রিন্টে ব্যবহৃত হবে — এই শাখার জন্য লিখুন</div>
+                  </div>
+                  <button class="btn btn-outline btn-xs" onclick="saveBranchDescTemplate()" title="এই শাখার জন্য ডিফল্ট হিসেবে সংরক্ষণ">
+                    💾 টেমপ্লেট সেভ
+                  </button>
+                </div>
+                <div class="form-grid" style="gap:12px;">
+                  <div class="form-group" style="margin-bottom:0">
+                    <label class="form-label">
+                      অতিরিক্ত কাজের বিবরণ
+                      <span style="color:var(--gold);font-size:10px;margin-left:4px">(কর্মচারীর বক্তব্য)</span>
+                    </label>
+                    <textarea
+                      id="billDescInput"
+                      class="form-input"
+                      rows="4"
+                      placeholder="উল্লেখিত তারিখে অফিস সময়ের পরে..."
+                    ></textarea>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0">
+                    <label class="form-label">
+                      সুপারভাইজারের মন্তব্য
+                      <span style="color:var(--gold);font-size:10px;margin-left:4px">(প্রত্যয়ন)</span>
+                    </label>
+                    <textarea
+                      id="supCommentInput"
+                      class="form-input"
+                      rows="4"
+                      placeholder="এই মর্মে প্রত্যায়ন করা যাইতেছে যে..."
+                    ></textarea>
+                  </div>
+                </div>
+              </div>
+
               <!-- Summary + Actions -->
               <div class="form-grid" style="padding: 0 0 20px; gap: 16px">
                 <div class="summary-box">
@@ -488,7 +559,7 @@
                   <div class="card-title">কর্মচারী ডেটাবেস</div>
                   <div class="card-sub">Employee records &amp; management</div>
                 </div>
-                <button class="btn btn-primary" onclick="openEmpModal()">
+                <button class="btn btn-primary admin-only" onclick="openEmpModal()">
                   ＋ কর্মচারী যোগ
                 </button>
               </div>
@@ -599,148 +670,92 @@
     </div>
 
     <!-- ═══════════════ ADMIN MODAL ═══════════════ -->
-    <div class="overlay" id="adminOverlay">
-      <div class="modal" style="width: 390px">
+    <!-- ═══════════════ LOGIN OVERLAY ═══════════════ -->
+    <div id="loginOverlay" style="position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;background:var(--bg-deep);">
+      <div class="modal" style="width:400px;border:1px solid var(--gold-border);">
+        <!-- Header -->
+        <div style="text-align:center;padding-bottom:16px;border-bottom:1px solid var(--gold-border);margin-bottom:18px;">
+          <div style="font-size:36px;margin-bottom:4px;">⚓</div>
+          <div style="font-size:16px;font-weight:700;color:var(--gold2);">মোংলা বন্দর কর্তৃপক্ষ</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px;">OT Bill Management System</div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="admin-tabs" style="margin-bottom:16px;">
+          <button id="loginTabBtn" class="admin-tab active" onclick="switchLoginTab('login')">লগইন</button>
+          <button id="registerTabBtn" class="admin-tab" onclick="switchLoginTab('register')">নিবন্ধন</button>
+        </div>
+
+        <!-- Login Form -->
+        <div id="loginForm">
+          <div class="form-group" style="margin-bottom:10px;">
+            <label class="form-label"><span id="loginIdLabel">IC নম্বর</span> <span id="loginIdHint" style="color:var(--muted);font-size:10px;">কর্মচারী লগইন</span></label>
+            <input type="text" id="loginUsername" class="form-input" placeholder="আপনার IC নম্বর" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()"/>
+          </div>
+          <div class="form-group" style="margin-bottom:10px;">
+            <label class="form-label">পাসওয়ার্ড</label>
+            <input type="password" id="loginPassword" class="form-input" placeholder="পাসওয়ার্ড দিন" onkeydown="if(event.key==='Enter')doLogin()"/>
+          </div>
+          <div id="loginError" style="color:#fca5a5;font-size:12px;margin-bottom:10px;min-height:16px;"></div>
+          <button class="btn btn-primary w-full" onclick="doLogin()">🔓 লগইন</button>
+        </div>
+
+        <!-- Register Form -->
+        <div id="registerForm" style="display:none;">
+          <div style="background:rgba(212,175,55,0.08);border:1px solid var(--gold-border);border-radius:var(--r-sm);padding:8px 12px;font-size:11px;color:var(--gold2);margin-bottom:12px;">
+            IC নম্বরই আপনার লগইন ID হবে। প্রাথমিক পাসওয়ার্ড: <strong>123456</strong>
+          </div>
+          <div class="form-group" style="margin-bottom:10px;">
+            <label class="form-label">পূর্ণ নাম</label>
+            <input type="text" id="regName" class="form-input" placeholder="আপনার পূর্ণ নাম"/>
+          </div>
+          <div class="form-group" style="margin-bottom:10px;">
+            <label class="form-label">পদবী</label>
+            <input type="text" id="regDesig" class="form-input" placeholder="পদবী"/>
+          </div>
+          <div class="form-group" style="margin-bottom:10px;">
+            <label class="form-label">IC নম্বর</label>
+            <input type="text" id="regIC" class="form-input" placeholder="আপনার IC নম্বর"/>
+          </div>
+          <div class="form-group" style="margin-bottom:10px;">
+            <label class="form-label">বিভাগ</label>
+            <input type="text" id="regDept" class="form-input" value="ট্রাফিক"/>
+          </div>
+          <div class="form-group" style="margin-bottom:10px;">
+            <label class="form-label">শাখা</label>
+            <input type="text" id="regBranch" class="form-input" value="রাজস্ব ও রিটার্ন"/>
+          </div>
+          <div class="form-group" style="margin-bottom:10px;">
+            <label class="form-label">মূল বেতন</label>
+            <input type="number" id="regBasic" class="form-input" placeholder="০" onkeydown="if(event.key==='Enter')doRegister()"/>
+          </div>
+          <div id="registerError" style="color:#fca5a5;font-size:12px;margin-bottom:10px;min-height:16px;"></div>
+          <button class="btn btn-primary w-full" onclick="doRegister()">✓ নিবন্ধন করুন</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ EMPLOYEE CHANGE PASSWORD ═══════════════ -->
+    <div class="overlay" id="empChangePwOverlay">
+      <div class="modal" style="width:360px;">
         <div class="modal-head">
-          <div class="modal-title">🔐 Admin Access</div>
-          <button class="modal-x" onclick="closeAdminModal()">✕</button>
+          <div class="modal-title">🔑 পাসওয়ার্ড পরিবর্তন</div>
+          <button class="modal-x" onclick="closeEmpChangePw()">✕</button>
         </div>
-
-        <!-- Login / Change-password section -->
-        <div id="adminLoginSection">
-          <div class="admin-tabs">
-            <button
-              id="adminTabLogin"
-              class="admin-tab active"
-              onclick="showAdminTab('login')"
-            >
-              লগইন
-            </button>
-            <button
-              id="adminTabChange"
-              class="admin-tab"
-              onclick="showAdminTab('change')"
-            >
-              পাসওয়ার্ড পরিবর্তন
-            </button>
-          </div>
-
-          <!-- Login tab -->
-          <div id="adminLoginTab">
-            <div class="form-group" style="margin-bottom: 10px">
-              <label class="form-label" for="adminIdInput">Admin ID</label>
-              <input
-                type="text"
-                id="adminIdInput"
-                class="form-input"
-                placeholder="admin ID দিন"
-                autocomplete="off"
-              />
-            </div>
-            <div class="form-group mb-3">
-              <label class="form-label" for="adminPwInput">পাসওয়ার্ড</label>
-              <input
-                type="password"
-                id="adminPwInput"
-                class="form-input"
-                placeholder="পাসওয়ার্ড দিন"
-              />
-            </div>
-            <div
-              id="adminError"
-              style="
-                color: #fca5a5;
-                font-size: 12px;
-                margin-bottom: 10px;
-                min-height: 16px;
-              "
-            ></div>
-            <button class="btn btn-primary w-full" onclick="tryAdminLogin()">
-              🔓 লগইন
-            </button>
-          </div>
-
-          <!-- Change password tab -->
-          <div id="adminChangeTab" style="display: none">
-            <div class="form-group" style="margin-bottom: 10px">
-              <label class="form-label" for="adminCurPw"
-                >বর্তমান পাসওয়ার্ড</label
-              >
-              <input
-                type="password"
-                id="adminCurPw"
-                class="form-input"
-                placeholder="বর্তমান পাসওয়ার্ড"
-              />
-            </div>
-            <div class="form-group" style="margin-bottom: 10px">
-              <label class="form-label" for="adminNewPw">নতুন পাসওয়ার্ড</label>
-              <input
-                type="password"
-                id="adminNewPw"
-                class="form-input"
-                placeholder="নূন্যতম ৬ অক্ষর"
-              />
-            </div>
-            <div class="form-group mb-3" style="margin-bottom: 10px">
-              <label class="form-label" for="adminNewPw2"
-                >নতুন পাসওয়ার্ড নিশ্চিত করুন</label
-              >
-              <input
-                type="password"
-                id="adminNewPw2"
-                class="form-input"
-                placeholder="আবার দিন"
-              />
-            </div>
-            <div
-              id="adminErrorChange"
-              style="
-                color: #fca5a5;
-                font-size: 12px;
-                margin-bottom: 10px;
-                min-height: 16px;
-              "
-            ></div>
-            <button
-              class="btn btn-primary w-full"
-              onclick="changeAdminPassword()"
-            >
-              ✓ পাসওয়ার্ড পরিবর্তন করুন
-            </button>
-          </div>
+        <div class="form-group" style="margin-bottom:10px;">
+          <label class="form-label">বর্তমান পাসওয়ার্ড</label>
+          <input type="password" id="empCurPw" class="form-input" placeholder="বর্তমান পাসওয়ার্ড"/>
         </div>
-
-        <!-- Logout section (shown when already admin) -->
-        <div
-          id="adminLogoutSection"
-          style="
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            text-align: center;
-            gap: 12px;
-          "
-        >
-          <div style="font-size: 36px; margin-top: 4px">🔐</div>
-          <div style="color: var(--gold2); font-weight: 700; font-size: 16px">
-            Admin Mode চালু আছে
-          </div>
-          <div style="color: var(--muted); font-size: 12px; line-height: 1.7">
-            আপনি এখন কর্মচারী সম্পাদনা ও মুছতে পারবেন
-          </div>
-          <div class="flex gap-2" style="width: 100%; margin-top: 4px">
-            <button
-              class="btn btn-outline w-full"
-              onclick="openChangePwFromAdmin()"
-            >
-              🔑 পাসওয়ার্ড পরিবর্তন
-            </button>
-            <button class="btn btn-danger w-full" onclick="adminLogout()">
-              🔒 লগআউট
-            </button>
-          </div>
+        <div class="form-group" style="margin-bottom:10px;">
+          <label class="form-label">নতুন পাসওয়ার্ড <span style="color:var(--muted);font-size:10px;">(নূন্যতম ৬ অক্ষর)</span></label>
+          <input type="password" id="empNewPw" class="form-input" placeholder="নতুন পাসওয়ার্ড"/>
         </div>
+        <div class="form-group" style="margin-bottom:10px;">
+          <label class="form-label">নিশ্চিত করুন</label>
+          <input type="password" id="empNewPw2" class="form-input" placeholder="আবার দিন" onkeydown="if(event.key==='Enter')doEmpChangePw()"/>
+        </div>
+        <div id="empPwError" style="color:#fca5a5;font-size:12px;margin-bottom:10px;min-height:16px;"></div>
+        <button class="btn btn-primary w-full" onclick="doEmpChangePw()">✓ পরিবর্তন করুন</button>
       </div>
     </div>
 
