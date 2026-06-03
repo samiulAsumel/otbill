@@ -1423,6 +1423,7 @@ function buildTimeOpts(sel) {
       html += `<option value="${val}"${val === sel ? " selected" : ""}>${lbl}</option>`;
     }
   }
+  html += `<option value="24:00"${"24:00" === sel ? " selected" : ""}>${bn("24")}:${bn("00")}</option>`;
   return html;
 }
 
